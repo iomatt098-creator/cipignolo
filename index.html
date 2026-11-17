@@ -133,6 +133,22 @@ nav.tabs button.on{color:var(--ink);font-weight:800}
 .ob .push{margin-top:auto}
 .hidden{display:none!important}
 .sr{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0)}
+.stack{display:flex;height:16px;border-radius:8px;overflow:hidden;background:rgba(59,36,48,.1);margin:10px 0 6px}
+.stack>i{display:block;height:100%}
+.mrow{display:flex;align-items:center;gap:10px;padding:7px 0;border:0;background:none;width:100%;text-align:left;font-weight:700;font-size:15px}
+.mrow .sw{width:12px;height:12px;border-radius:4px;flex:none}
+.mrow .grow{flex:1;min-width:0}
+.mrow.tot{border-top:1px solid var(--line);margin-top:4px;padding-top:10px;font-weight:800}
+.chip.sm{min-height:36px;padding:0 12px;font-size:14px}
+.chi3{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px;margin-top:8px}
+.chi3 .chip{min-width:0;overflow:hidden;text-overflow:ellipsis;padding:0 8px}
+.obrow{background:var(--card);border-radius:18px;padding:12px;margin-bottom:10px;box-shadow:0 2px 6px rgba(59,36,48,.06)}
+.obrow .in{min-height:44px;font-size:16px}
+.g2{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:8px;margin-top:8px}
+.g2 label{display:block;font-size:12px;font-weight:800;color:var(--text2);margin-bottom:3px}
+.obrow .row b{font-size:16px}
+.who{font-size:12px;font-weight:800;color:var(--ink)}
+details.more summary{cursor:pointer;font-weight:800;color:var(--ink);min-height:44px;display:flex;align-items:center}
 </style>
 </head>
 <body>
@@ -148,9 +164,11 @@ nav.tabs button.on{color:var(--ink);font-weight:800}
    CIPIGNOLO – fai contare i tuoi soldi
    App gratuita, senza server: i dati restano nel browser.
    Non è consulenza finanziaria.
+   Versione 2 (17/11/2026): coppia con nickname, Casa,
+   Abbonamenti, Rate e debiti separati, mappa dei soldi.
    ========================================================= */
 
-const KEY = "cipignolo-v1";
+const KEY = "cipignolo-v1"; // stessa chiave: i dati di prima restano
 const $ = (s, r = document) => r.querySelector(s);
 const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
 const eur0 = new Intl.NumberFormat("it-IT", {style:"currency", currency:"EUR", maximumFractionDigits:0, useGrouping:"always"});
@@ -158,6 +176,7 @@ const eur2 = new Intl.NumberFormat("it-IT", {style:"currency", currency:"EUR", m
 const fmt = n => eur0.format(Math.round(n || 0));
 const fmt2 = n => eur2.format(n || 0);
 const pct = n => Math.round(n) + "%";
+const dec = n => String(Math.round(n * 10) / 10).replace(".", ",");
 const uid = () => Date.now().toString(36) + Math.random().toString(36).slice(2, 7);
 const pad = n => String(n).padStart(2, "0");
 const iso = d => `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
@@ -166,13 +185,19 @@ const today = () => { const d = new Date(); d.setHours(0, 0, 0, 0); return d; };
 const addDays = (d, n) => { const x = new Date(d); x.setDate(x.getDate() + n); return x; };
 const daysBetween = (a, b) => Math.round((parse(iso(b)) - parse(iso(a))) / 864e5);
 const weekStart = d => { const x = new Date(d); x.setHours(0, 0, 0, 0); x.setDate(x.getDate() - ((x.getDay() + 6) % 7)); return x; };
+const dim = (y, m) => new Date(y, m + 1, 0).getDate();
+const addMonths = (base, k) => { const t = base.getMonth() + k, y = base.getFullYear() + Math.floor(t / 12), m = ((t % 12) + 12) % 12; return new Date(y, m, Math.min(base.getDate(), dim(y, m))); };
+const meseDi = d => ({ a:new Date(d.getFullYear(), d.getMonth(), 1), b:new Date(d.getFullYear(), d.getMonth() + 1, 0) });
 const MESI = ["gennaio","febbraio","marzo","aprile","maggio","giugno","luglio","agosto","settembre","ottobre","novembre","dicembre"];
 const MESI_B = ["gen","feb","mar","apr","mag","giu","lug","ago","set","ott","nov","dic"];
 const GIORNI = ["domenica","lunedì","martedì","mercoledì","giovedì","venerdì","sabato"];
+const dataBreve = d => `${d.getDate()} ${MESI_B[d.getMonth()]}${d.getFullYear() !== today().getFullYear() ? " " + d.getFullYear() : ""}`;
+const meseAnno = d => `${MESI_B[d.getMonth()]} ${d.getFullYear()}`;
 const num = v => { const s = String(v ?? "").trim().replace(/\s|€/g, ""); if (!s) return 0; const n = parseFloat(s.includes(",") ? s.replace(/\./g, "").replace(",", ".") : s); return isFinite(n) ? n : 0; };
 const numOrNull = v => String(v ?? "").trim() === "" ? null : num(v);
 const sum = (a, f = x => x) => (a || []).reduce((t, x) => t + (+f(x) || 0), 0);
 const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
+const lista = a => a.length <= 1 ? a.join("") : a.slice(0, -1).join(", ") + " e " + a[a.length - 1];
 
 /* ---------- livelli e colori ---------- */
 const LEVELS = [
@@ -196,7 +221,7 @@ const MSG = [
   "Ce l'hai fatta. Che testa dura!"
 ];
 
-/* ---------- categorie e tasti rapidi predefiniti ---------- */
+/* ---------- categorie, tasti rapidi, voci fisse ---------- */
 const DEF_CATS = ["Spesa","Bar e colazioni","Sigarette","Benzina","Pranzi e cene","Salute","Svago","Varie"];
 const RAPIDI_CATALOGO = [
   { nome:"Caffè", tipo:"fisso", prezzo:1.2, cat:"Bar e colazioni" },
@@ -213,6 +238,12 @@ const RAPIDI_CATALOGO = [
   { nome:"Svago", tipo:"libero", prezzo:null, cat:"Svago" }
 ];
 const CAT_TINT = ["#FFDCCB","#D7F0E0","#E7DEFA","#D3F0F5","#FFE1EA","#FFF1C7","#E3E8EE","#F6E3EA"];
+const FREQ = [[1,"Ogni mese"],[2,"Ogni 2 mesi"],[3,"Ogni 3 mesi"],[4,"Ogni 4 mesi"],[6,"Ogni 6 mesi"],[12,"Ogni anno"]];
+const freqTxt = f => ({1:"ogni mese",2:"ogni 2 mesi",3:"ogni 3 mesi",4:"ogni 4 mesi",6:"ogni 6 mesi",12:"ogni anno"})[f] || `ogni ${f} mesi`;
+const CASA_SUGG = [["Affitto",1],["Luce",2],["Gas",2],["Acqua",3],["Internet",1],["Rifiuti (TARI)",4],["Condominio",1]];
+const ABB_SUGG = [["Telefono",1],["Netflix",1],["Spotify",1],["Amazon Prime",12],["Disney+",1],["Palestra",1],["iCloud",1]];
+const freqDi = (nome, sugg) => (sugg.find(([n]) => n.toLowerCase() === String(nome).toLowerCase()) || [0, 1])[1];
+const dataDefault = () => { const t = today(); return iso(new Date(t.getFullYear(), t.getMonth() + 1, 15)); };
 
 const HABITS = [
   "Voglia di una sigaretta in più? Aspetta 5 minuti e bevi un bicchiere d'acqua.",
@@ -226,10 +257,11 @@ const HABITS = [
 /* ---------- stato ---------- */
 function blank() {
   return {
-    v:1, setup:false, setupAt:null, modo:"solo",
-    entrate:{ tipo:"fisso", importo:0, importo2:0, giorno:23 },
-    budgetMensile:null,
-    fisse:[], debiti:[],
+    v:2, setup:false, setupAt:null, modo:"solo",
+    nick:{ p1:"Io", p2:"Partner" }, chiAttivo:"p1",
+    entrate:{ tipo:"fisso", importo:0, importo2:0, giorno:23, giorno2:23 },
+    budgetMensile:null, budgetPers:{ p1:null, p2:null },
+    casa:[], abbonamenti:[], debiti:[], fisse:[],
     fondo:{ saldo:0, prima:null },
     categorie:DEF_CATS.slice(),
     rapidi:[], spese:[], obiettivi:[], scadenze:[], extra:[],
@@ -237,37 +269,121 @@ function blank() {
     medaglie:{}, ultimoBackup:null
   };
 }
+/* porta i dati della versione 1 nella versione 2 */
+function migra(s) {
+  const b = blank();
+  s = Object.assign(b, s);
+  s.nick = Object.assign({ p1:"Io", p2:"Partner" }, s.nick || {});
+  s.budgetPers = Object.assign({ p1:null, p2:null }, s.budgetPers || {});
+  if (s.entrate.giorno2 == null) s.entrate.giorno2 = s.entrate.giorno;
+  if ((s.fisse || []).length) {
+    const t = today(), d1 = iso(new Date(t.getFullYear(), t.getMonth(), 1));
+    s.fisse.forEach(f => {
+      const abb = /abbonament/i.test(f.nome);
+      (abb ? s.abbonamenti : s.casa).push({ id:f.id || uid(), nome: abb && f.nome === "Abbonamenti" ? "Abbonamenti (totale)" : f.nome, importo:+f.importo || 0, freq:1, data:d1, chi:"ins" });
+    });
+    s.fisse = [];
+  }
+  s.debiti.forEach(d => { if (!d.chi) d.chi = "ins"; });
+  s.v = 2;
+  return s;
+}
 let S = load();
 function load() {
-  try { const raw = localStorage.getItem(KEY); if (raw) return Object.assign(blank(), JSON.parse(raw)); } catch (e) {}
+  try { const raw = localStorage.getItem(KEY); if (raw) return migra(JSON.parse(raw)); } catch (e) {}
   return blank();
 }
 function save() {
   try { localStorage.setItem(KEY, JSON.stringify(S)); } catch (e) { toast("Non riesco a salvare sul telefono"); }
 }
 
-/* ---------- calcoli ---------- */
-const entrate = () => (+S.entrate.importo || 0) + (S.modo === "coppia" ? (+S.entrate.importo2 || 0) : 0);
-const fisseTot = () => sum(S.fisse, f => f.importo);
-const debitiAttivi = () => S.debiti.filter(d => (+d.saldo || 0) > 0);
+/* ---------- coppia ---------- */
+const coppia = () => S.modo === "coppia";
+const nomeChi = k => k === "p2" ? S.nick.p2 : k === "ins" ? "Insieme" : S.nick.p1;
+const CHI = () => [["p1", S.nick.p1], ["p2", S.nick.p2], ["ins", "Insieme"]];
+const chiDi = s => coppia() ? (s.chi || "ins") : "p1";
+const chiChips = (sel, attr = "data-chi") => `<div class="chi3">${CHI().map(([k, l]) => `<button type="button" class="chip sm ${sel === k ? "on" : ""}" ${attr}="${k}" aria-pressed="${sel === k}">${esc(l)}</button>`).join("")}</div>`;
+
+/* ---------- voci che si ripetono (casa, abbonamenti) ---------- */
+function occIn(v, a, b) {
+  if (!v.data) return null;
+  const base = parse(v.data), f = Math.max(1, +v.freq || 1);
+  const diff = (a.getFullYear() - base.getFullYear()) * 12 + a.getMonth() - base.getMonth();
+  const k0 = Math.floor(diff / f);
+  for (let k = k0 - 1; k <= k0 + 1; k++) { const d = addMonths(base, k * f); if (d >= a && d <= b) return d; }
+  return null;
+}
+function prossima(v, dal = today()) {
+  if (!v.data) return null;
+  const base = parse(v.data), f = Math.max(1, +v.freq || 1);
+  const diff = (dal.getFullYear() - base.getFullYear()) * 12 + dal.getMonth() - base.getMonth();
+  let k = Math.floor(diff / f) - 1, d;
+  do { d = addMonths(base, k * f); k++; } while (d < dal);
+  return d;
+}
+const uscitaIn = (l, m) => sum(l, v => occIn(v, m.a, m.b) ? +v.importo : 0);
+const mediaMese = l => sum(l, v => (+v.importo || 0) / Math.max(1, +v.freq || 1));
+const fisseMese = m => uscitaIn(S.casa, m) + uscitaIn(S.abbonamenti, m);
+const fisseMedia = () => mediaMese(S.casa) + mediaMese(S.abbonamenti);
+const voci = () => [...S.casa.map(v => ({ ...v, k:"casa" })), ...S.abbonamenti.map(v => ({ ...v, k:"abb" }))];
+
+/* ---------- debiti ----------
+   Mutuo e prestiti: l'utente dà rata e data dell'ultima rata (dati certi).
+   Se aggiunge il residuo, oppure importo iniziale e data della prima rata,
+   l'app ricava il tasso con l'ammortamento alla francese (stima).
+   Carte e altri debiti: saldo, rata e tasso come prima. */
+const aRate = d => d.tipo === "mutuo" || d.tipo === "prestito";
+function nRateDa(fine, dal) {
+  const f = parse(fine);
+  return Math.max(0, (f.getFullYear() - dal.getFullYear()) * 12 + f.getMonth() - dal.getMonth() + (f.getDate() >= dal.getDate() ? 1 : 0));
+}
+const annuita = (r, n) => r > 0 ? (1 - Math.pow(1 + r, -n)) / r : n;
+function trovaTasso(P, R, n) {
+  if (!(P > 0 && R > 0 && n > 0)) return null;
+  if (R * n <= P) return 0;
+  let lo = 0, hi = 0.1;
+  if (R * annuita(hi, n) > P) return hi;
+  for (let i = 0; i < 80; i++) { const mid = (lo + hi) / 2; if (R * annuita(mid, n) > P) lo = mid; else hi = mid; }
+  return (lo + hi) / 2;
+}
+function info(d) {
+  const R = +d.rata || 0;
+  if (aRate(d)) {
+    if (!d.fine) {
+      const v = d.residuo ?? d.saldo, saldo = v != null && v !== "" ? +v || 0 : null, tasso = d.tasso ?? null;
+      return { aRate:true, senzaFine:true, n:null, R, saldo, eff:saldo || 0, tasso, r:tasso != null ? tasso / 1200 : null, chiuso: !!d.chiuso || (saldo != null && saldo <= 0) };
+    }
+    const n = nRateDa(d.fine, today()), chiuso = !!d.chiuso || n === 0;
+    let r = null, saldo = null, N = null, incoerente = false;
+    if (+d.residuo > 0) {
+      const n0 = nRateDa(d.fine, d.residuoData ? parse(d.residuoData) : today());
+      r = trovaTasso(+d.residuo, R, n0); incoerente = R * n0 < +d.residuo * 0.98;
+    } else if (+d.importo > 0 && d.inizio) {
+      N = nRateDa(d.fine, parse(d.inizio)); r = trovaTasso(+d.importo, R, N); incoerente = R * N < +d.importo * 0.98;
+    }
+    if (r != null) saldo = chiuso ? 0 : R * annuita(r, n);
+    const totRate = chiuso ? 0 : R * n;
+    return { aRate:true, n, N, R, r, tasso: r != null ? Math.round(r * 1200 * 100) / 100 : null, stimato:true, saldo, totRate,
+      eff: saldo != null ? saldo : totRate, chiuso, incoerente,
+      intRata: saldo != null ? saldo * r : null, intTot: saldo != null ? Math.max(0, totRate - saldo) : null };
+  }
+  const saldo = +d.saldo || 0, tasso = d.tasso ?? null;
+  return { aRate:false, R, saldo, eff:saldo, tasso, r: tasso != null ? tasso / 1200 : null, chiuso: saldo <= 0 };
+}
+const debitiAttivi = () => S.debiti.filter(d => !info(d).chiuso);
 const rateTot = () => sum(debitiAttivi(), d => d.rata);
 const rateNoMutuo = () => sum(debitiAttivi().filter(d => d.tipo !== "mutuo"), d => d.rata);
-const budgetSuggerito = () => Math.max(0, Math.floor((entrate() - fisseTot() - rateTot()) * 0.9 / 5) * 5);
-const budgetMese = () => S.budgetMensile == null ? budgetSuggerito() : +S.budgetMensile;
-const budgetSett = () => budgetMese() * 12 / 52;
-const speseMese = () => fisseTot() + rateTot() + budgetMese();
-const avanzo = () => entrate() - speseMese();
-const mesiTarget = () => S.entrate.tipo === "variabile" ? 6 : 3;
-const fondoMesi = () => speseMese() > 0 ? S.fondo.saldo / speseMese() : 0;
-const isCaro = d => d.tasso != null && d.tasso > 10 && d.saldo > 0;
+const isCaro = d => { const i = info(d); return !i.chiuso && i.tasso != null && i.tasso > 10; };
 const debitiCari = () => S.debiti.filter(isCaro);
-const interessiMese = d => (d.saldo || 0) * (d.tasso || 0) / 1200;
+const interessiMese = d => { const i = info(d); return (i.eff || 0) * (i.r || 0); };
+const cartaSenzaTasso = () => S.debiti.find(d => !aRate(d) && d.tipo === "carta" && !info(d).chiuso && d.tasso == null);
 const ordineDebiti = () => S.debiti.slice().sort((a, b) => {
-  if ((a.saldo > 0) !== (b.saldo > 0)) return a.saldo > 0 ? -1 : 1;
+  const ia = info(a), ib = info(b);
+  if (ia.chiuso !== ib.chiuso) return ia.chiuso ? 1 : -1;
   if ((a.tipo === "mutuo") !== (b.tipo === "mutuo")) return a.tipo === "mutuo" ? 1 : -1;
-  return (b.tasso ?? -1) - (a.tasso ?? -1);
+  return (ib.tasso ?? -1) - (ia.tasso ?? -1);
 });
-function mesiAllaChiusura(d) {
+function mesiCarta(d) {
   const S0 = +d.saldo || 0, R = +d.rata || 0; if (S0 <= 0) return 0; if (R <= 0) return null;
   const r = (+d.tasso || 0) / 1200;
   if (r > 0) { if (R <= S0 * r) return Infinity; return Math.ceil(-Math.log(1 - r * S0 / R) / Math.log(1 + r)); }
@@ -275,9 +391,29 @@ function mesiAllaChiusura(d) {
 }
 function meseFra(n) { const d = today(); d.setDate(1); d.setMonth(d.getMonth() + n - 1); return `${MESI[d.getMonth()]} ${d.getFullYear()}`; }
 
+/* ---------- entrate e budget ---------- */
+const entrate = () => (+S.entrate.importo || 0) + (coppia() ? (+S.entrate.importo2 || 0) : 0);
+const budgetAuto = fisse => Math.max(0, Math.floor((entrate() - fisse - rateTot()) * 0.9 / 5) * 5);
+const budgetMeseDi = m => S.budgetMensile == null ? budgetAuto(fisseMese(m)) : +S.budgetMensile;
+const meseCorrente = () => meseDi(today());
+const budgetMese = () => budgetMeseDi(meseCorrente());
+const budgetSuggerito = () => budgetAuto(fisseMese(meseCorrente()));
+const budgetSettDi = ws => { const m = meseDi(addDays(ws, 3)); return budgetMeseDi(m) * 7 / m.b.getDate(); };
+const budgetSett = () => budgetSettDi(weekStart(today()));
+const budgetMedio = () => S.budgetMensile == null ? budgetAuto(fisseMedia()) : +S.budgetMensile;
+const speseMese = () => fisseMedia() + rateTot() + budgetMedio();   // media, per fondo e livelli
+const avanzo = () => entrate() - speseMese();
+const mesiTarget = () => S.entrate.tipo === "variabile" ? 6 : 3;
+const fondoMesi = () => speseMese() > 0 ? S.fondo.saldo / speseMese() : 0;
+function budgetPersona(k, bs) {
+  if (!coppia()) return k === "p1" ? bs : 0;
+  const b1 = +S.budgetPers.p1 || 0, b2 = +S.budgetPers.p2 || 0;
+  if (k === "p1") return b1 || null; if (k === "p2") return b2 || null;
+  return b1 || b2 ? Math.max(0, bs - b1 - b2) : null;
+}
+
 const speseIn = (a, b) => { const A = iso(a), B = iso(b); return S.spese.filter(s => s.data >= A && s.data <= B); };
 const settimana = off => { const s = addDays(weekStart(today()), off * 7); return { a:s, b:addDays(s, 6) }; };
-const meseCorrente = () => { const d = today(); return { a:new Date(d.getFullYear(), d.getMonth(), 1), b:new Date(d.getFullYear(), d.getMonth() + 1, 0) }; };
 
 /* criteri dei livelli: tutti quelli fino a k devono essere veri */
 function criteri() {
@@ -286,7 +422,7 @@ function criteri() {
     true,
     e > 0 && avanzo() >= 0,
     sm > 0 && S.fondo.saldo >= sm,
-    debitiCari().length === 0 && S.debiti.every(d => !(d.saldo > 0 && d.tasso == null && d.tipo === "carta")),
+    debitiCari().length === 0 && !cartaSenzaTasso(),
     e > 0 && rateNoMutuo() <= e * 0.15,
     sm > 0 && S.fondo.saldo >= sm * mesiTarget(),
     S.obiettivi.some(o => (+o.saldo || 0) > 0),
@@ -298,14 +434,14 @@ function candidato() { const c = criteri(); let k = 0; for (let i = 1; i < c.len
 function progresso(k) {
   const e = entrate(), sm = speseMese();
   switch (k) {
-    case 1: { const m = -avanzo(); return { p: e > 0 ? clamp(e / sm * 100, 0, 99) : 0, h: m > 0 ? `Mancano ${fmt(m)} al mese per chiudere in pari` : "Ci sei quasi" }; }
-    case 2: { const m = sm - S.fondo.saldo; return { p: clamp(S.fondo.saldo / sm * 100, 0, 100), h: `Ti mancano ${fmt(Math.max(0, m))} per il Cuscinetto` }; }
-    case 3: { const c = debitiCari(); const tot = sum(c, d => d.saldo), ini = sum(c, d => d.saldoIniziale || d.saldo);
-      const senza = S.debiti.find(d => d.saldo > 0 && d.tasso == null && d.tipo === "carta");
+    case 1: { const m = -avanzo(); return { p: e > 0 && sm > 0 ? clamp(e / sm * 100, 0, 99) : 0, h: m > 0 ? `Mancano ${fmt(m)} al mese per chiudere in pari` : "Ci sei quasi" }; }
+    case 2: { const m = sm - S.fondo.saldo; return { p: sm > 0 ? clamp(S.fondo.saldo / sm * 100, 0, 100) : 0, h: `Ti mancano ${fmt(Math.max(0, m))} per il Cuscinetto` }; }
+    case 3: { const c = debitiCari(); const tot = sum(c, d => info(d).eff), ini = sum(c, d => d.saldoIniziale || info(d).eff);
+      const senza = cartaSenzaTasso();
       if (!c.length && senza) return { p: 50, h: `Scrivi il tasso di ${senza.nome} per capire se è caro` };
       return { p: ini > 0 ? clamp((1 - tot / ini) * 100, 0, 100) : 0, h: c.length === 1 ? `${c[0].nome}: restano ${fmt(tot)}` : `Debiti cari: restano ${fmt(tot)}` }; }
     case 4: { const r = e > 0 ? rateNoMutuo() / e * 100 : 0; return { p: r > 0 ? clamp(15 / r * 100, 0, 100) : 100, h: `Rate al ${pct(r)}, obiettivo 15%` }; }
-    case 5: { const m = fondoMesi(); return { p: clamp(m / mesiTarget() * 100, 0, 100), h: `Fondo a ${m.toFixed(1).replace(".", ",")} mesi su ${mesiTarget()}` }; }
+    case 5: { const m = fondoMesi(); return { p: clamp(m / mesiTarget() * 100, 0, 100), h: `Fondo a ${dec(m)} mesi su ${mesiTarget()}` }; }
     case 6: return { p: S.obiettivi.length ? 50 : 0, h: S.obiettivi.length ? "Metti qualcosa nel tuo obiettivo" : "Scegli il tuo primo obiettivo" };
     case 7: { const d = S.livello.date[6] ? daysBetween(parse(S.livello.date[6]), today()) : 0; return { p: clamp(d / 180 * 100, 0, 100), h: `Ancora ${Math.max(0, Math.ceil((180 - d) / 30))} mesi così e il Cipignolo è d'oro` }; }
     default: return { p: 100, h: "Cipignolo d'oro: mantieni il ritmo" };
@@ -317,7 +453,7 @@ function settimanePassate() {
   if (!S.spese.length) return [];
   const first = S.spese.reduce((m, s) => s.data < m ? s.data : m, S.spese[0].data);
   const out = []; let w = weekStart(parse(first)); const cur = weekStart(today());
-  while (w < cur) { const b = addDays(w, 6); const sp = speseIn(w, b); out.push({ a:w, spese:sp, tot:sum(sp, s => s.importo), attiva:sp.length > 0 }); w = addDays(w, 7); }
+  while (w < cur) { const b = addDays(w, 6); const sp = speseIn(w, b); out.push({ a:w, spese:sp, tot:sum(sp, s => s.importo), bs:budgetSettDi(w), attiva:sp.length > 0 }); w = addDays(w, 7); }
   return out;
 }
 function serieGiorni() {
@@ -328,28 +464,29 @@ function serieGiorni() {
 const SFIDE = [
   { t:"Almeno 3 giorni senza spese al bar", ok: sp => { const giorniBar = new Set(sp.filter(s => /bar|colazion|caff/i.test(s.cat + " " + (s.nome || ""))).map(s => s.data)); return 7 - giorniBar.size >= 3; } },
   { t:"Almeno 2 giorni senza nessuna spesa", ok: sp => 7 - new Set(sp.map(s => s.data)).size >= 2 },
-  { t:"Chiudi la settimana sotto budget", ok: sp => sum(sp, s => s.importo) <= budgetSett() }
+  { t:"Chiudi la settimana sotto budget", ok: (sp, a) => sum(sp, s => s.importo) <= budgetSettDi(a) }
 ];
 const sfidaDi = d => SFIDE[Math.floor(weekStart(d).getTime() / (7 * 864e5)) % SFIDE.length];
+const sotto = w => w.attiva && w.tot <= w.bs;
 
 const MEDALS = [
   { id:"gettone", n:"Primo gettone", d:"Prima spesa segnata", ok:() => S.spese.length > 0 },
   { id:"mappa", n:"Mappa dei soldi", d:"Configurazione completata", ok:() => S.setup },
   { id:"abit7", n:"Abitudine", d:"Spese segnate 7 giorni di fila", ok:() => serieGiorni() >= 7 },
   { id:"abit30", n:"Abitudine 30", d:"30 giorni di fila", ok:() => serieGiorni() >= 30 },
-  { id:"oro", n:"Settimana d'oro", d:"Prima settimana sotto budget", ok:() => settimanePassate().some(w => w.attiva && w.tot <= budgetSett()) },
-  { id:"testa", n:"Testa dura", d:"4 settimane di fila sotto budget", ok:() => { let r = 0; return settimanePassate().some(w => { r = w.attiva && w.tot <= budgetSett() ? r + 1 : 0; return r >= 4; }); } },
-  { id:"riparte", n:"Ripartenza", d:"Sotto budget dopo una settimana storta", ok:() => { const w = settimanePassate(); return w.some((x, i) => i > 0 && w[i-1].attiva && w[i-1].tot > budgetSett() && x.attiva && x.tot <= budgetSett()); } },
+  { id:"oro", n:"Settimana d'oro", d:"Prima settimana sotto budget", ok:() => settimanePassate().some(sotto) },
+  { id:"testa", n:"Testa dura", d:"4 settimane di fila sotto budget", ok:() => { let r = 0; return settimanePassate().some(w => { r = sotto(w) ? r + 1 : 0; return r >= 4; }); } },
+  { id:"riparte", n:"Ripartenza", d:"Sotto budget dopo una settimana storta", ok:() => { const w = settimanePassate(); return w.some((x, i) => i > 0 && w[i-1].attiva && w[i-1].tot > w[i-1].bs && sotto(x)); } },
   { id:"f100", n:"Primi 100", d:"100 € nel fondo", ok:() => S.fondo.saldo >= 100 },
   { id:"f500", n:"Primi 500", d:"500 € nel fondo", ok:() => S.fondo.saldo >= 500 },
   { id:"f1000", n:"Primi 1.000", d:"1.000 € nel fondo", ok:() => S.fondo.saldo >= 1000 },
   { id:"salva", n:"Salvagente", d:"Fondo usato e ricostruito", ok:() => !!S.fondo.ricostruito },
   { id:"meta", n:"Metà e metà", d:"Un extra diviso tra piano e te", ok:() => S.extra.some(x => x.diviso) },
-  { id:"unameno", n:"Una in meno", d:"Una rata finita", ok:() => S.debiti.some(d => d.saldo <= 0 && !d.eraCaro) },
-  { id:"addio", n:"Addio interessi", d:"Un debito caro chiuso", ok:() => S.debiti.some(d => d.saldo <= 0 && d.eraCaro) },
+  { id:"unameno", n:"Una in meno", d:"Una rata finita", ok:() => S.debiti.some(d => info(d).chiuso && !d.eraCaro) },
+  { id:"addio", n:"Addio interessi", d:"Un debito caro chiuso", ok:() => S.debiti.some(d => info(d).chiuso && d.eraCaro) },
   { id:"norate", n:"Niente rate nuove", d:"3 mesi senza aprirne", ok:() => S.setupAt && daysBetween(parse(S.setupAt), today()) >= 90 && !S.debiti.some(d => d.creato && d.creato > S.setupAt) },
   { id:"sogno", n:"Sogno in tasca", d:"Primo obiettivo raggiunto", ok:() => S.obiettivi.some(o => o.target > 0 && o.saldo >= o.target) },
-  { id:"sfida", n:"Sfida vinta", d:"Una sfida della settimana completata", ok:() => settimanePassate().some(w => w.attiva && sfidaDi(w.a).ok(w.spese)) }
+  { id:"sfida", n:"Sfida vinta", d:"Una sfida della settimana completata", ok:() => settimanePassate().some(w => w.attiva && sfidaDi(w.a).ok(w.spese, w.a)) }
 ];
 
 /* aggiorna livello e medaglie dopo ogni cambiamento */
@@ -371,12 +508,25 @@ function livelloInPausa() { const c = candidato(); return c < S.livello.max ? c 
 /* ---------- consigli (regole "se… allora…") ---------- */
 function consigli() {
   const out = []; const e = entrate();
-  const cari = debitiCari().sort((a, b) => b.tasso - a.tasso);
+  const cari = debitiCari().sort((a, b) => info(b).tasso - info(a).tasso);
   if (e > 0 && (avanzo() < -e * 0.1 || rateNoMutuo() > e * 0.4))
     out.push({ k:"help", t:"Se i debiti sono diventati troppo pesanti non sei solo: uno sportello gratuito (associazioni dei consumatori, sportelli anti-usura) può aiutarti a trovare una strada." });
-  if (cari.length) out.push({ k:"tip", t:`Chiudi prima ${esc(cari[0].nome)}: al ${String(cari[0].tasso).replace(".", ",")}% ti costa circa ${fmt(interessiMese(cari[0]))} di interessi al mese.` });
-  const senza = S.debiti.find(d => d.saldo > 0 && d.tasso == null);
-  if (senza) out.push({ k:"tip", t:`Sai il tasso di ${esc(senza.nome)}? Ci aiuta a capire quale debito chiudere prima. Lo trovi nell'estratto conto o nel contratto.` });
+  if (cari.length) { const i = info(cari[0]); out.push({ k:"tip", t:`Chiudi prima ${esc(cari[0].nome)}: al ${String(i.tasso).replace(".", ",")}%${i.stimato ? " (stima)" : ""} ti costa circa ${fmt(interessiMese(cari[0]))} di interessi al mese.` }); }
+  /* bollette e rinnovi non mensili in arrivo il mese prossimo */
+  const t = today(), next = meseDi(new Date(t.getFullYear(), t.getMonth() + 1, 1));
+  const inArrivo = voci().filter(v => (+v.freq || 1) > 1 && occIn(v, next.a, next.b));
+  if (inArrivo.length) { const tot = sum(inArrivo, v => v.importo);
+    out.push({ k:"tip", t:`A ${MESI[next.a.getMonth()]} arriva${inArrivo.length > 1 ? "no" : ""} ${esc(lista(inArrivo.map(v => v.nome)))} (${fmt(tot)}): quel mese il budget settimanale sarà più basso di circa ${fmt(tot * 7 / next.b.getDate())}.` }); }
+  S.abbonamenti.forEach(v => { const p = prossima(v), f = +v.freq || 1; if (!p) return; const gg = daysBetween(t, p);
+    if (gg >= 0 && gg <= (f >= 3 ? 14 : 3)) out.push({ k:"tip", t:`${esc(v.nome)} si rinnova ${gg === 0 ? "oggi" : `il ${dataBreve(p)}`} (${fmt2(v.importo)}): lo usi ancora? Se no, è il momento di disdire.` }); });
+  const ct = cartaSenzaTasso() || S.debiti.find(d => !aRate(d) && !info(d).chiuso && d.tasso == null);
+  if (ct) out.push({ k:"tip", t:`Sai il tasso di ${esc(ct.nome)}? Ci aiuta a capire quale debito chiudere prima. Lo trovi nell'estratto conto o nel contratto.` });
+  const sf = S.debiti.find(d => aRate(d) && !d.fine && !info(d).chiuso);
+  if (sf) out.push({ k:"tip", t:`Aggiungi la data dell'ultima rata di ${esc(sf.nome)}: la trovi nel contratto o nell'app della banca. Così la data di fine è sempre giusta.` });
+  const inc = S.debiti.find(d => aRate(d) && info(d).incoerente);
+  if (inc) out.push({ k:"warn", t:`Su ${esc(inc.nome)} i numeri non tornano: rata per rate rimaste fa meno del debito. Controlla la data dell'ultima rata e il residuo.` });
+  const sr = S.debiti.find(d => aRate(d) && d.fine && !info(d).chiuso && info(d).saldo == null);
+  if (sr) out.push({ k:"tip", t:`Vuoi sapere quanto di ogni rata di ${esc(sr.nome)} va in interessi? Aggiungi il debito residuo che vedi nell'app della banca: il resto lo calcoliamo noi.` });
   if (speseMese() > 0 && fondoMesi() < 1) out.push({ k:"tip", t:`Prima priorità: un fondo pari a 1 mese di spese, cioè ${fmt(speseMese())}.` });
   const m = meseCorrente(); const sp = speseIn(m.a, m.b); const tot = sum(sp, s => s.importo);
   if (tot >= 50) {
@@ -391,7 +541,7 @@ function consigli() {
     out.push({ k:"warn", t:"Settimana storta, non piano rovinato: si riparte lunedì." });
   if (S.extra.some(x => !x.diviso && daysBetween(parse(x.data), today()) <= 30))
     out.push({ k:"tip", t:"È arrivato un extra: metà al piano, metà a te. Te lo sei meritato." });
-  const p = S.debiti.find(d => d.tipo === "prestito" && d.saldo > 0 && d.saldo < 10000);
+  const p = S.debiti.find(d => d.tipo === "prestito" && !info(d).chiuso && info(d).saldo != null && info(d).saldo > 0 && info(d).saldo < 10000);
   if (p) out.push({ k:"tip", t:`${esc(p.nome)} è sotto i 10.000 €: valuta se chiuderlo in anticipo. Chiedi alla banca il conteggio di estinzione e le eventuali penali.` });
   if (debitiAttivi().some(d => d.tipo !== "mutuo" && d.rata > 0)) out.push({ k:"tip", t:"Evita nuove rate finché non chiudi quelle in corso." });
   return out;
@@ -433,10 +583,12 @@ const ICON = {
   coin:'<circle cx="12" cy="12" r="9"/><path d="M14.5 9a3 3 0 1 0 0 6M8 11h5M8 13h5"/>'
 };
 const ico = (k, sw = 2, c = "currentColor") => `<svg viewBox="0 0 24 24" fill="none" stroke="${c}" stroke-width="${sw}" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${ICON[k]}</svg>`;
+const xIco = (c = "currentColor") => ico("plus", 2.2, c).replace("<svg", '<svg style="transform:rotate(45deg)"');
 const icoFor = r => /caff|cornett|colazion|bar/i.test(r.nome + r.cat) ? "cup" : /sigar/i.test(r.nome + r.cat) ? "smoke" : /benzin/i.test(r.nome) ? "fuel" : /spesa/i.test(r.nome) ? "cart" : "coin";
 function medalSvg(on, label) {
   return `<svg width="52" height="52" viewBox="0 0 52 52" role="img" aria-label="${esc(label)}"><circle cx="26" cy="26" r="22" fill="${on ? "#F2C14E" : "#EFE8EB"}" stroke="${on ? "#C9901A" : "#D6CCD1"}" stroke-width="4"/><path d="M26 13l3.8 7.8 8.6 1.2-6.2 6 1.5 8.5L26 32.4l-7.7 4.1 1.5-8.5-6.2-6 8.6-1.2z" fill="${on ? "#FFF5DC" : "#fff"}"/></svg>`;
 }
+const COL = { casa:"#FF8A5C", abb:"#9B7BE0", rate:"#2FB3C9", giorni:"#3DAA6B", parte:"#F2C14E" };
 
 /* ---------- tema ---------- */
 function applyTheme(k) {
@@ -465,14 +617,16 @@ function sheet(html, mount) {
   sh.addEventListener("touchend", e => { if (y0 == null) return; const dy = e.changedTouches[0].clientY - y0; y0 = null; if (dy > 90) closeSheet(); else sh.style.transform = ""; });
   document.addEventListener("keydown", escClose);
   mount && mount(b);
-  const f = b.querySelector("input:not([type=checkbox]),select"); if (f) setTimeout(() => f.focus(), 60);
+  const f = b.querySelector("input:not([type=checkbox]):not([type=date]),select"); if (f) setTimeout(() => f.focus(), 60);
   return b;
 }
 function escClose(e) { if (e.key === "Escape") closeSheet(); }
 function closeSheet(now) { const b = $("#bd"); document.removeEventListener("keydown", escClose); if (!b) return; if (now) { b.remove(); return; } b.classList.remove("show"); setTimeout(() => b.remove(), 200); }
+const valStr = v => v != null && v !== "" ? String(v).replace(".", ",") : "";
 function moneyField(id, val, label) {
-  return `<label class="f" for="${id}">${label}</label><div class="money"><input id="${id}" inputmode="decimal" placeholder="0" value="${val != null && val !== "" ? String(val).replace(".", ",") : ""}"><span>€</span></div>`;
+  return `<label class="f" for="${id}">${label}</label><div class="money"><input id="${id}" inputmode="decimal" placeholder="0" value="${valStr(val)}"><span>€</span></div>`;
 }
+const freqSel = (cls, v) => `<select class="in ${cls}" aria-label="Ogni quanto">${FREQ.map(([k, l]) => `<option value="${k}" ${+v === k ? "selected" : ""}>${l}</option>`).join("")}</select>`;
 function commit(msg, undo) { check(); render(); if (msg) toast(msg, undo); }
 
 /* =========================================================
@@ -480,19 +634,33 @@ function commit(msg, undo) { check(); render(); if (msg) toast(msg, undo); }
    ========================================================= */
 let OB = null;
 function startOnboarding() {
-  OB = { step:0, modo:"solo", casa:"", abb:"", rate:"", debiti:"", risparmi:"", fisso:null, imp:"", imp2:"", giorno:"23", rapidi:new Set(["Caffè","Spesa","Benzina"]) };
+  OB = { step:0, modo:"solo", nick1:"", nick2:"", affitto:"",
+    bollette:[["Luce",2],["Gas",2],["Acqua",3],["Internet",1],["Rifiuti (TARI)",4]].map(([nome, freq]) => ({ nome, importo:"", freq, data:dataDefault() })),
+    abb:[], rate:[], debiti:"", risparmi:"", fisso:null, imp:"", imp2:"", giorno:"23", giorno2:"23",
+    rapidi:new Set(["Caffè","Spesa","Benzina"]) };
   renderOB();
 }
 const OB_STEPS = [
   { q:"Gestisci i conti da solo o in coppia?", kind:"modo" },
-  { q:"Quanto spendi al mese per la casa?", s:"Affitto o mutuo e bollette, tutto insieme.", kind:"money", key:"casa", chips:[300,500,700,1000] },
-  { q:"E per gli abbonamenti?", s:"Telefono, internet, streaming, palestra: il totale al mese.", kind:"money", key:"abb", chips:[30,50,80,120] },
-  { q:"Quanto paghi di rate al mese?", s:"Prestiti, finanziamenti, acquisti a rate. Il mutuo l'hai già messo nella casa.", kind:"money", key:"rate", chips:[0,100,250,400] },
-  { q:"Quanto devi in tutto?", s:"Carte e prestiti, la cifra che resta da restituire. Il mutuo non contarlo.", kind:"money", key:"debiti", chips:[0,1000,5000,15000] },
+  { q:"Quanto paghi di affitto al mese?", s:"Se hai un mutuo o la casa è tua, salta: il mutuo lo mettiamo tra le rate.", kind:"money", key:"affitto", chips:[0,400,600,800] },
+  { q:"E le bollette di casa?", s:"Scrivi l'importo dell'ultima bolletta, ogni quanto arriva e la prossima data. Basta anche solo la cifra.", kind:"bollette" },
+  { q:"Hai abbonamenti?", s:"Telefono, streaming, palestra… Ognuno con prezzo e data di rinnovo.", kind:"abb" },
+  { q:"Mutuo, prestiti o finanziamenti?", s:"Ti chiediamo solo la rata e la data dell'ultima rata: le trovi nel contratto o nell'app della banca.", kind:"rate" },
+  { q:"Hai carte o debiti senza una data di fine?", s:"Carte revolving, scoperti, prestiti da amici: quanto resta in tutto.", kind:"money", key:"debiti", chips:[0,500,1000,3000] },
   { q:"Quanto hai già da parte?", s:"Risparmi sul conto o in un conto deposito.", kind:"money", key:"risparmi", chips:[0,500,1000,3000] },
-  { q:"Il tuo stipendio è fisso?", kind:"stipendio" },
+  { q:"Lo stipendio è fisso?", kind:"stipendio" },
   { q:"Quali spese fai più spesso?", s:"Scegline 4-6: diventano tasti da un tocco. Potrai cambiarli quando vuoi.", kind:"rapidi" }
 ];
+const NSTEP = OB_STEPS.length;
+const nk = (i) => esc((i === 2 ? OB.nick2 : OB.nick1).trim() || (i === 2 ? "Persona 2" : "Persona 1"));
+function obRow(kind, r, i) {
+  if (kind === "bollette") return `<div class="obrow"><div class="row"><b>${esc(r.nome)}</b><input class="in" data-ob="bollette.${i}.importo" inputmode="decimal" placeholder="€" value="${esc(valStr(r.importo))}" style="width:110px;text-align:right"></div>
+    <div class="g2"><div><label>Ogni quanto</label>${freqSel("", r.freq).replace("<select", `<select data-ob="bollette.${i}.freq"`)}</div><div><label>Prossima bolletta</label><input class="in" type="date" data-ob="bollette.${i}.data" value="${esc(r.data)}"></div></div></div>`;
+  if (kind === "abb") return `<div class="obrow"><div class="row" style="gap:8px"><input class="in" data-ob="abb.${i}.nome" value="${esc(r.nome)}" placeholder="Nome" style="flex:1"><input class="in" data-ob="abb.${i}.importo" inputmode="decimal" placeholder="€" value="${esc(valStr(r.importo))}" style="width:96px;text-align:right"><button type="button" class="ibtn" data-obrm="abb.${i}" aria-label="Togli" style="box-shadow:none;background:var(--bg)">${xIco()}</button></div>
+    <div class="g2"><div><label>Ogni quanto</label>${freqSel("", r.freq).replace("<select", `<select data-ob="abb.${i}.freq"`)}</div><div><label>Si rinnova il</label><input class="in" type="date" data-ob="abb.${i}.data" value="${esc(r.data)}"></div></div></div>`;
+  return `<div class="obrow"><div class="row" style="gap:8px"><input class="in" data-ob="rate.${i}.nome" value="${esc(r.nome)}" placeholder="Nome" style="flex:1"><button type="button" class="ibtn" data-obrm="rate.${i}" aria-label="Togli" style="box-shadow:none;background:var(--bg)">${xIco()}</button></div>
+    <div class="g2"><div><label>Rata al mese</label><input class="in" data-ob="rate.${i}.rata" inputmode="decimal" placeholder="€" value="${esc(valStr(r.rata))}"></div><div><label>Ultima rata</label><input class="in" type="date" data-ob="rate.${i}.fine" value="${esc(r.fine)}"></div></div></div>`;
+}
 function renderOB() {
   applyTheme(1);
   const root = $("#root");
@@ -511,53 +679,82 @@ function renderOB() {
   let body = "";
   if (st.kind === "modo") {
     body = `<div class="seg"><button class="opt ${OB.modo === "solo" ? "on" : ""}" data-modo="solo" aria-pressed="${OB.modo === "solo"}">Da solo</button><button class="opt ${OB.modo === "coppia" ? "on" : ""}" data-modo="coppia" aria-pressed="${OB.modo === "coppia"}">In coppia o famiglia</button></div>
-      <p class="small">In coppia mettiamo insieme due stipendi e le spese comuni, tutto su questo telefono. Puoi cambiarlo quando vuoi.</p>`;
+      ${OB.modo === "coppia" ? `<label class="f" for="n1">Come ti chiamiamo?</label><input class="in" id="n1" maxlength="14" value="${esc(OB.nick1)}" placeholder="es. Matte">
+      <label class="f" for="n2">E l'altra persona?</label><input class="in" id="n2" maxlength="14" value="${esc(OB.nick2)}" placeholder="es. Giuli">
+      <p class="small">Bastano due soprannomi: servono a distinguere chi guadagna e chi spende cosa. Restano solo su questo telefono.</p>`
+      : `<p class="small">In coppia ognuno ha il suo stipendio e le sue spese, più una cassa comune. Puoi cambiarlo quando vuoi.</p>`}`;
   } else if (st.kind === "money") {
-    body = `${moneyField("v", OB[st.key], "Cifra al mese".replace(" al mese", st.key === "debiti" || st.key === "risparmi" ? "" : " al mese"))}
+    body = `${moneyField("v", OB[st.key], st.key === "affitto" ? "Affitto al mese" : "Cifra")}
       <div class="chips">${st.chips.map(c => `<button class="chip ${num(OB[st.key]) === c && OB[st.key] !== "" ? "on" : ""}" data-chip="${c}">${c.toLocaleString("it-IT")}</button>`).join("")}</div>
       <p class="small center" style="margin-top:14px">Va bene anche a occhio, puoi correggere quando vuoi.</p>`;
+  } else if (st.kind === "bollette") {
+    body = OB.bollette.map((r, i) => obRow("bollette", r, i)).join("") +
+      `<p class="small center">Lascia vuote quelle che non paghi. Ogni bolletta pesa nel mese in cui arriva: ti avvisiamo prima.</p>`;
+  } else if (st.kind === "abb") {
+    const have = new Set(OB.abb.map(a => a.nome.toLowerCase()));
+    body = `<div class="chips" style="margin-bottom:12px">${ABB_SUGG.filter(([n]) => !have.has(n.toLowerCase())).map(([n]) => `<button class="chip sm" data-addabb="${esc(n)}">+ ${esc(n)}</button>`).join("")}<button class="chip sm" data-addabb="">+ Altro</button></div>
+      ${OB.abb.map((r, i) => obRow("abb", r, i)).join("") || `<p class="small center">Tocca quelli che hai. Nessuno? Vai avanti.</p>`}`;
+  } else if (st.kind === "rate") {
+    body = `<div class="seg"><button class="opt" data-addrata="mutuo">+ Mutuo</button><button class="opt" data-addrata="prestito">+ Prestito o finanziamento</button></div>
+      <div style="margin-top:12px">${OB.rate.map((r, i) => obRow("rate", r, i)).join("") || `<p class="small center">Nessuna rata? Vai avanti.</p>`}</div>
+      ${OB.rate.length ? `<p class="small">Se non hai la data sotto mano lasciala vuota: te la chiediamo dopo. Quanto va in interessi lo calcoliamo noi più avanti.</p>` : ""}`;
   } else if (st.kind === "stipendio") {
     const two = OB.modo === "coppia";
     body = `<div class="seg"><button class="opt ${OB.fisso === true ? "on" : ""}" data-fisso="1" aria-pressed="${OB.fisso === true}">Sì, fisso</button><button class="opt ${OB.fisso === false ? "on" : ""}" data-fisso="0" aria-pressed="${OB.fisso === false}">No, cambia</button></div>
       <div class="${OB.fisso === null ? "hidden" : ""}">
-      ${moneyField("v", OB.imp, OB.fisso === false ? (two ? "Quanto entra in media al mese (tu)" : "Quanto entra in media al mese") : (two ? "Il tuo stipendio" : "Quanto prendi al mese"))}
-      ${two ? moneyField("v2", OB.imp2, "Lo stipendio dell'altra persona") : ""}
-      ${OB.fisso ? `<label class="f" for="g">In che giorno arriva?</label><input class="in" id="g" inputmode="numeric" value="${esc(OB.giorno)}">` : `<p class="small">Stima pure a occhio: nei prossimi mesi vediamo insieme se torna.</p>`}</div>`;
+      ${moneyField("v", OB.imp, OB.fisso === false ? (two ? `Quanto entra in media al mese a ${nk(1)}` : "Quanto entra in media al mese") : (two ? `Stipendio di ${nk(1)}` : "Quanto prendi al mese"))}
+      ${OB.fisso ? `<label class="f" for="g">In che giorno arriva?</label><input class="in" id="g" inputmode="numeric" value="${esc(OB.giorno)}">` : ""}
+      ${two ? moneyField("v2", OB.imp2, OB.fisso === false ? `Quanto entra in media a ${nk(2)}` : `Stipendio di ${nk(2)}`) + (OB.fisso ? `<label class="f" for="g2">In che giorno arriva?</label><input class="in" id="g2" inputmode="numeric" value="${esc(OB.giorno2)}">` : "") : ""}
+      ${OB.fisso === false ? `<p class="small">Stima pure a occhio: nei prossimi mesi vediamo insieme se torna.</p>` : ""}</div>`;
   } else if (st.kind === "rapidi") {
     body = `<div class="chips">${RAPIDI_CATALOGO.map(r => `<button class="chip ${OB.rapidi.has(r.nome) ? "on" : ""}" data-rap="${esc(r.nome)}" aria-pressed="${OB.rapidi.has(r.nome)}">${esc(r.nome)}${r.tipo === "fisso" ? ` · ${fmt2(r.prezzo)}` : ""}</button>`).join("")}</div>
       <p class="small" style="margin-top:12px">Per alcune voci, come le sigarette, ti chiediamo il prezzo la prima volta. Spesa e benzina aprono il tastierino.</p>`;
   }
+  const canSkip = ["money", "bollette", "abb", "rate"].includes(st.kind);
   root.innerHTML = `<div class="ob">
-    <div class="row"><button class="ibtn" id="back" aria-label="Indietro">${ico("left", 2.4)}</button><div class="label">Passo ${OB.step} di 8</div><div style="width:44px"></div></div>
-    <div class="steps" aria-hidden="true">${OB_STEPS.map((_, i) => `<i class="${i < OB.step ? "on" : ""}"></i>`).join("")}</div>
-    <div class="center">${piggy(LEVELS[0].piggy, true, 150)}</div>
+    <div class="row"><button class="ibtn" id="back" aria-label="Indietro">${ico("left", 2.4)}</button><div class="label">Passo ${OB.step} di ${NSTEP}</div><div style="width:44px"></div></div>
+    <div class="steps" aria-hidden="true" style="grid-template-columns:repeat(${NSTEP},minmax(0,1fr))">${OB_STEPS.map((_, i) => `<i class="${i < OB.step ? "on" : ""}"></i>`).join("")}</div>
+    ${["bollette", "abb", "rate"].includes(st.kind) ? "" : `<div class="center">${piggy(LEVELS[0].piggy, true, 150)}</div>`}
     <div><h1>${st.q}</h1>${st.s ? `<p class="sub" style="margin-top:8px">${st.s}</p>` : ""}</div>
     <div>${body}</div>
-    <div class="push"><button class="btn" id="next">${OB.step === 8 ? "Fatto!" : "Avanti"}</button>
-    ${st.kind === "money" ? '<button class="link" id="skip" style="display:block;margin:6px auto 0">Non lo so, salto</button>' : ""}</div></div>`;
+    <div class="push"><button class="btn" id="next">${OB.step === NSTEP ? "Fatto!" : "Avanti"}</button>
+    ${canSkip ? '<button class="link" id="skip" style="display:block;margin:6px auto 0">Non lo so, salto</button>' : ""}</div></div>`;
   $("#back").onclick = () => { syncOB(); OB.step--; renderOB(); };
-  $("#next").onclick = () => { syncOB(); if (st.kind === "stipendio" && OB.fisso === null) { toast("Scegli se lo stipendio è fisso"); return; } if (st.kind === "stipendio" && !num(OB.imp)) { toast("Scrivi una cifra, anche approssimativa"); return; } if (OB.step === 8) finishOB(); else { OB.step++; renderOB(); } };
-  const sk = $("#skip"); if (sk) sk.onclick = () => { OB[st.key] = ""; OB.step++; renderOB(); };
-  document.querySelectorAll("[data-modo]").forEach(b => b.onclick = () => { OB.modo = b.dataset.modo; renderOB(); });
+  $("#next").onclick = () => { syncOB();
+    if (st.kind === "stipendio" && OB.fisso === null) { toast("Scegli se lo stipendio è fisso"); return; }
+    if (st.kind === "stipendio" && !num(OB.imp) && !num(OB.imp2)) { toast("Scrivi una cifra, anche approssimativa"); return; }
+    if (OB.step === NSTEP) finishOB(); else { OB.step++; renderOB(); window.scrollTo(0, 0); } };
+  const sk = $("#skip"); if (sk) sk.onclick = () => { if (st.key) OB[st.key] = ""; else if (st.kind === "bollette") OB.bollette.forEach(b => b.importo = ""); else OB[st.kind] = []; OB.step++; renderOB(); };
+  document.querySelectorAll("[data-modo]").forEach(b => b.onclick = () => { syncOB(); OB.modo = b.dataset.modo; renderOB(); });
   document.querySelectorAll("[data-fisso]").forEach(b => b.onclick = () => { syncOB(); OB.fisso = b.dataset.fisso === "1"; renderOB(); });
   document.querySelectorAll("[data-chip]").forEach(b => b.onclick = () => { OB[st.key] = b.dataset.chip; renderOB(); });
   document.querySelectorAll("[data-rap]").forEach(b => b.onclick = () => { const n = b.dataset.rap; OB.rapidi.has(n) ? OB.rapidi.delete(n) : OB.rapidi.add(n); renderOB(); });
+  document.querySelectorAll("[data-addabb]").forEach(b => b.onclick = () => { syncOB(); const n = b.dataset.addabb; OB.abb.push({ nome:n, importo:"", freq:n ? freqDi(n, ABB_SUGG) : 1, data:dataDefault() }); renderOB(); });
+  document.querySelectorAll("[data-addrata]").forEach(b => b.onclick = () => { syncOB(); const t = b.dataset.addrata; OB.rate.push({ tipo:t, nome: t === "mutuo" ? "Mutuo" : "Prestito", rata:"", fine:"" }); renderOB(); });
+  document.querySelectorAll("[data-obrm]").forEach(b => b.onclick = () => { syncOB(); const [k, i] = b.dataset.obrm.split("."); OB[k].splice(+i, 1); renderOB(); });
 }
 function syncOB() {
   const st = OB_STEPS[OB.step - 1]; if (!st) return;
   if (st.kind === "money" && $("#v")) OB[st.key] = $("#v").value;
-  if (st.kind === "stipendio") { if ($("#v")) OB.imp = $("#v").value; if ($("#v2")) OB.imp2 = $("#v2").value; if ($("#g")) OB.giorno = $("#g").value; }
+  if (st.kind === "modo") { if ($("#n1")) OB.nick1 = $("#n1").value; if ($("#n2")) OB.nick2 = $("#n2").value; }
+  if (st.kind === "stipendio") { if ($("#v")) OB.imp = $("#v").value; if ($("#v2")) OB.imp2 = $("#v2").value; if ($("#g")) OB.giorno = $("#g").value; if ($("#g2")) OB.giorno2 = $("#g2").value; }
+  document.querySelectorAll("[data-ob]").forEach(el => { const [k, i, f] = el.dataset.ob.split("."); if (OB[k] && OB[k][+i]) OB[k][+i][f] = el.value; });
 }
 function finishOB() {
-  const s = blank(); const t = iso(today());
+  const s = blank(); const t = iso(today()), now = today();
   s.setup = true; s.setupAt = t; s.modo = OB.modo;
-  s.entrate = { tipo: OB.fisso ? "fisso" : "variabile", importo: num(OB.imp), importo2: num(OB.imp2), giorno: clamp(parseInt(OB.giorno, 10) || 23, 1, 31) };
-  if (num(OB.casa)) s.fisse.push({ id:uid(), nome:"Casa (affitto o mutuo e bollette)", importo:num(OB.casa) });
-  if (num(OB.abb)) s.fisse.push({ id:uid(), nome:"Abbonamenti", importo:num(OB.abb) });
-  if (num(OB.debiti) || num(OB.rate)) s.debiti.push({ id:uid(), nome:"Debiti e rate", tipo:"prestito", saldo:num(OB.debiti) || num(OB.rate) * 12, saldoIniziale:num(OB.debiti) || num(OB.rate) * 12, tasso:null, rata:num(OB.rate), creato:t });
+  if (OB.modo === "coppia") s.nick = { p1: OB.nick1.trim() || "Persona 1", p2: OB.nick2.trim() || "Persona 2" };
+  s.entrate = { tipo: OB.fisso ? "fisso" : "variabile", importo: num(OB.imp), importo2: num(OB.imp2),
+    giorno: clamp(parseInt(OB.giorno, 10) || 23, 1, 31), giorno2: clamp(parseInt(OB.giorno2, 10) || 23, 1, 31) };
+  if (num(OB.affitto)) s.casa.push({ id:uid(), nome:"Affitto", importo:num(OB.affitto), freq:1, data:iso(new Date(now.getFullYear(), now.getMonth(), 1)), chi:"ins" });
+  OB.bollette.filter(b => num(b.importo)).forEach(b => s.casa.push({ id:uid(), nome:b.nome, importo:num(b.importo), freq:+b.freq || 1, data:b.data || dataDefault(), chi:"ins" }));
+  OB.abb.filter(a => num(a.importo)).forEach(a => s.abbonamenti.push({ id:uid(), nome:a.nome.trim() || "Abbonamento", importo:num(a.importo), freq:+a.freq || 1, data:a.data || dataDefault(), chi:"ins" }));
+  OB.rate.filter(r => num(r.rata)).forEach(r => s.debiti.push({ id:uid(), nome:r.nome.trim() || (r.tipo === "mutuo" ? "Mutuo" : "Prestito"), tipo:r.tipo, rata:num(r.rata), fine:r.fine || null, residuo:null, importo:null, inizio:null, chi:"ins", creato:t }));
+  if (num(OB.debiti)) s.debiti.push({ id:uid(), nome:"Carte e debiti", tipo:"carta", saldo:num(OB.debiti), saldoIniziale:num(OB.debiti), tasso:null, rata:0, chi:"ins", creato:t });
   s.fondo.saldo = num(OB.risparmi);
   s.rapidi = RAPIDI_CATALOGO.filter(r => OB.rapidi.has(r.nome)).map(r => ({ ...r, id:uid() }));
   S = s; OB = null;
+  S.debiti.forEach(d => d.saldoIniziale = d.saldoIniziale || info(d).eff);
   check(true); save(); VIEW = "home"; render();
   setTimeout(() => celebraLivello(S.livello.max, -1), 300);
 }
@@ -565,7 +762,7 @@ function finishOB() {
 /* =========================================================
    VISTE
    ========================================================= */
-let VIEW = "home", WEEK = 0;
+let VIEW = "home", WEEK = 0, FILTRO = "tutti";
 function render() {
   if (!S.setup) { if (!OB) startOnboarding(); else renderOB(); return; }
   const lv = S.livello.max; applyTheme(lv);
@@ -584,13 +781,14 @@ function render() {
 function vHome() {
   const lv = S.livello.max, L = LEVELS[lv], pausa = livelloInPausa();
   const pr = progresso(pausa || lv + 1);
-  const w = settimana(0), spent = sum(speseIn(w.a, w.b), s => s.importo), bs = budgetSett();
+  const w = settimana(0), spW = speseIn(w.a, w.b), spent = sum(spW, s => s.importo), bs = budgetSett();
   const left = bs - spent, used = bs > 0 ? clamp(spent / bs * 100, 0, 100) : 0;
   const giorniRest = 7 - ((today().getDay() + 6) % 7);
-  const sf = sfidaDi(today()); const sfOk = sf.ok(speseIn(w.a, today()));
+  const sf = sfidaDi(today()); const sfOk = sf.ok(speseIn(w.a, today()), w.a);
   const tip = consigli()[0];
   const fondoPausa = pausa === 2 || pausa === 5;
   const msg = pausa ? (fondoPausa ? "Il fondo ha fatto il suo lavoro. Ora lo ricostruiamo." : "Un passo indietro capita: si riparte da qui.") : MSG[lv];
+  const chiA = S.chiAttivo || "p1";
   return `
   <section class="hero">
     ${lv === 7 ? `<div class="deco coin" style="left:30px;top:24px">€</div><div class="deco coin" style="right:40px;top:70px;width:22px;height:22px;font-size:11px">€</div><div class="deco coin" style="left:58px;top:150px;width:18px;height:18px"></div>` : ""}
@@ -600,23 +798,54 @@ function vHome() {
     <div class="msg">${msg}</div>
     <div style="width:100%"><div class="bar"><i style="width:${pr.p}%"></i></div><div class="hint" style="margin-top:6px">${esc(pr.h)}</div></div>
   </section>
-  <div class="card row">
-    <div class="col"><span class="label">${left >= 0 ? "Questa settimana puoi spendere" : "Questa settimana sei oltre di"}</span>
+  <div class="card">
+    <div class="row">
+    <div class="col"><span class="label">${left >= 0 ? "Questa settimana potete spendere".replace("potete", coppia() ? "potete" : "puoi") : "Questa settimana siete oltre di".replace("siete", coppia() ? "siete" : "sei")}</span>
       <span class="big" style="${left < 0 ? "color:var(--warn)" : ""}">${fmt(Math.abs(left))}</span>
       <span class="small">su ${fmt(bs)} · ${giorniRest === 1 ? "ultimo giorno" : `mancano ${giorniRest} giorni`}</span></div>
-    <div class="ring" aria-hidden="true" style="background:conic-gradient(${left < 0 ? "var(--warnbar)" : "var(--accent)"} 0 ${used}%, rgba(59,36,48,.1) ${used}% 100%)"><div>${pct(used)}</div></div>
+    <div class="ring" aria-hidden="true" style="background:conic-gradient(${left < 0 ? "var(--warnbar)" : "var(--accent)"} 0 ${used}%, rgba(59,36,48,.1) ${used}% 100%)"><div>${pct(used)}</div></div></div>
+    ${coppia() ? `<p class="small" style="margin:10px 0 0">Speso: ${CHI().map(([k, l]) => `${esc(l)} ${fmt(sum(spW.filter(s => chiDi(s) === k), s => s.importo))}`).join(" · ")}</p>` : ""}
   </div>
   <h2 class="s">Spesa rapida</h2>
+  ${coppia() ? `<p class="small" style="margin:-4px 0 0">Chi sta spendendo?</p>${chiChips(chiA, "data-chiat")}<div style="height:10px"></div>` : ""}
   <div class="grid3">
     ${S.rapidi.map(r => `<button class="qbtn" data-q="${r.id}">${ico(icoFor(r))}<b>${esc(r.nome)}</b><span>${r.tipo === "libero" ? "Inserisci" : r.prezzo != null ? fmt2(r.prezzo) : "Imposta prezzo"}</span></button>`).join("")}
     <button class="qbtn add" data-a="addSpesa">${ico("plus", 2.4)}<b>Altro</b></button>
   </div>
+  ${mappaHtml()}
+  ${inArrivoHtml()}
   <div class="card row" style="gap:14px"><div class="dot" style="background:${sfOk ? "var(--goodbg)" : "var(--bg)"}">${ico(sfOk ? "check" : "traguardi", 2.2, sfOk ? "#1E6B40" : "currentColor").replace("<svg", '<svg width="22" height="22"')}</div>
     <div class="col" style="flex:1"><span class="label">Sfida della settimana</span><b style="font-size:15px">${sf.t}</b><span class="small">${sfOk ? "Per ora ci sei, continua così!" : "Si chiude domenica: c'è tempo."}</span></div></div>
   ${tip ? tipHtml(tip) : ""}
   <div class="tip help"><svg viewBox="0 0 24 24" fill="none" stroke="#136D7D" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${ICON.heart}</svg><p>${HABITS[Math.floor(Date.now() / 864e5) % HABITS.length]}</p></div>
   <button class="btn line" data-a="consigli">Tutti i consigli</button>
   ${backupReminder()}`;
+}
+/* entrate → casa, abbonamenti, rate → resta per tutti i giorni */
+function mappaHtml() {
+  const m = meseCorrente(), e = entrate(), casa = uscitaIn(S.casa, m), abb = uscitaIn(S.abbonamenti, m), rate = rateTot();
+  const bud = budgetMese(), parte = e - casa - abb - rate - bud;
+  const parts = [["Casa", casa, COL.casa], ["Abbonamenti", abb, COL.abb], ["Rate e debiti", rate, COL.rate], ["Tutti i giorni", bud, COL.giorni], ["Da parte", Math.max(0, parte), COL.parte]];
+  const tot = Math.max(e, sum(parts, p => p[1])) || 1;
+  const row = (l, v, c, sign = "−") => `<button class="mrow" data-tab="${l === "Tutti i giorni" ? "spese" : "piano"}"><i class="sw" style="background:${c}"></i><span class="grow">${l}</span><span>${sign} ${fmt(v)}</span></button>`;
+  return `<h2 class="s">Mappa dei soldi <span class="small" style="font-size:14px">${MESI[m.a.getMonth()]}</span></h2>
+  <div class="card">
+    <div class="row" style="font-weight:800"><span>Entrate del mese</span><span class="mid" style="font-size:22px">${fmt(e)}</span></div>
+    <div class="stack" aria-hidden="true">${parts.filter(p => p[1] > 0).map(p => `<i style="width:${p[1] / tot * 100}%;background:${p[2]}"></i>`).join("")}</div>
+    ${row("Casa", casa, COL.casa)}${row("Abbonamenti", abb, COL.abb)}${row("Rate e debiti", rate, COL.rate)}
+    ${parte >= 0 ? row("Da parte", parte, COL.parte) : ""}
+    <div class="mrow tot"><i class="sw" style="background:${COL.giorni}"></i><span class="grow">Per tutti i giorni</span><span>${fmt(bud)}</span></div>
+    <p class="small" style="margin:4px 0 0">Circa ${fmt(budgetSett())} a settimana${fisseMese(m) > fisseMedia() + 1 ? `. Questo mese ci sono bollette o rinnovi in più: per questo è più basso` : ""}.</p>
+    ${parte < 0 ? `<div class="tip warn" style="margin-bottom:0"><svg viewBox="0 0 24 24" fill="none" stroke="#B4541A" stroke-width="2" stroke-linecap="round" aria-hidden="true">${ICON.bulb}</svg><p>Questo mese le uscite superano le entrate di ${fmt(-parte)}. Guardiamo insieme il Piano: un passo alla volta.</p></div>` : ""}
+  </div>`;
+}
+function inArrivoHtml() {
+  const t = today(), lim = addDays(t, 30);
+  const l = voci().map(v => ({ v, d:prossima(v) })).filter(x => x.d && x.d <= lim).sort((a, b) => a.d - b.d).slice(0, 4);
+  const rr = debitiAttivi().filter(d => d.rata > 0 && aRate(d) && d.fine).map(d => { const f = parse(d.fine); let x = new Date(t.getFullYear(), t.getMonth(), Math.min(f.getDate(), dim(t.getFullYear(), t.getMonth()))); if (x < t) x = addMonths(x, 1); return { v:{ nome:d.nome, importo:d.rata, k:"rate" }, d:x }; }).filter(x => x.d <= lim);
+  const all = [...l, ...rr].sort((a, b) => a.d - b.d).slice(0, 5);
+  if (!all.length) return "";
+  return `<h2 class="s">In arrivo</h2><div class="list">${all.map(({ v, d }) => `<button class="item" data-tab="piano"><div class="dot" style="background:${v.k === "casa" ? "#FFDCCB" : v.k === "abb" ? "#E7DEFA" : "#D3F0F5"};font-size:13px;flex-direction:column;line-height:1"><b>${d.getDate()}</b><span style="font-size:9px">${MESI_B[d.getMonth()]}</span></div><div class="grow"><b>${esc(v.nome)}</b><span class="small">${v.k === "casa" ? "Casa" : v.k === "abb" ? "Abbonamento" : "Rata"}</span></div><span class="amt">${fmt2(v.importo)}</span></button>`).join("")}</div>`;
 }
 function tipHtml(c) {
   const col = c.k === "warn" ? "#B4541A" : c.k === "help" ? "#136D7D" : "#8A5A00";
@@ -628,18 +857,20 @@ function backupReminder() {
   return `<div class="tip warn"><svg viewBox="0 0 24 24" fill="none" stroke="#B4541A" stroke-width="2" stroke-linecap="round" aria-hidden="true">${ICON.cal}</svg><p>È passato un mese dall'ultimo backup. Salvalo dalle impostazioni: se cambi telefono non perdi niente.</p></div>`;
 }
 
-/* ---------- SPESE ---------- */
+/* ---------- SPESE (solo quelle di tutti i giorni) ---------- */
 function vSpese() {
-  const w = settimana(WEEK), sp = speseIn(w.a, w.b).sort((a, b) => b.data.localeCompare(a.data) || (b.ts || 0) - (a.ts || 0));
-  const spent = sum(sp, s => s.importo), bs = budgetSett(), left = bs - spent;
-  const by = {}; sp.forEach(s => by[s.cat] = (by[s.cat] || 0) + s.importo);
+  const w = settimana(WEEK), all = speseIn(w.a, w.b).sort((a, b) => b.data.localeCompare(a.data) || (b.ts || 0) - (a.ts || 0));
+  const filt = coppia() && FILTRO !== "tutti" ? all.filter(s => chiDi(s) === FILTRO) : all;
+  const spent = sum(all, s => s.importo), bs = budgetSettDi(w.a), left = bs - spent;
+  const fSpent = sum(filt, s => s.importo);
+  const by = {}; filt.forEach(s => by[s.cat] = (by[s.cat] || 0) + s.importo);
   const cats = Object.entries(by).sort((a, b) => b[1] - a[1]);
-  const days = {}; sp.forEach(s => (days[s.data] = days[s.data] || []).push(s));
+  const days = {}; filt.forEach(s => (days[s.data] = days[s.data] || []).push(s));
   const label = d => { const x = daysBetween(parse(d), today()); return x === 0 ? "Oggi" : x === 1 ? "Ieri" : `${GIORNI[parse(d).getDay()][0].toUpperCase() + GIORNI[parse(d).getDay()].slice(1)} ${parse(d).getDate()}`; };
   const range = `${w.a.getDate()}${w.a.getMonth() !== w.b.getMonth() ? " " + MESI_B[w.a.getMonth()] : ""} – ${w.b.getDate()} ${MESI_B[w.b.getMonth()]}`;
   const tip = consigli().find(c => /pesa il/.test(c.t));
   return `
-  <h1 class="t">Spese</h1>
+  <h1 class="t">Spese</h1><p class="sub">Le spese di tutti i giorni. Casa, abbonamenti e rate sono nel Piano.</p>
   <div class="card row" style="padding:4px;border-radius:999px">
     <button class="ibtn" data-a="wprev" aria-label="Settimana precedente" style="box-shadow:none;background:var(--bg)">${ico("left", 2.4)}</button>
     <b style="font-size:15px">${WEEK === 0 ? "Questa settimana" : `Settimana ${range}`}</b>
@@ -651,41 +882,87 @@ function vSpese() {
     <div class="bar ${left < 0 ? "over" : ""}" style="margin-top:10px"><i style="width:${bs ? clamp(spent / bs * 100, 0, 100) : 0}%"></i></div>
     <p class="small" style="margin:8px 0 0">Budget della settimana: ${fmt(bs)}</p>
   </div>
-  ${cats.length ? `<h2 class="s">Dove sono andati</h2><div class="card">${cats.map(([c, v], i) => `<div style="margin:6px 0 10px"><div class="row" style="font-weight:800;font-size:14px"><span>${esc(c)}</span><span>${fmt2(v)}</span></div><div class="bar thin" style="margin-top:4px"><i style="width:${spent ? v / spent * 100 : 0}%;background:${["#3DAA6B","#FF8A5C","#9B7BE0","#2FB3C9","#EC6F9A","#E8A90C","#9AA6B2","#C9BCC2"][i % 8]}"></i></div></div>`).join("")}</div>` : ""}
+  ${coppia() ? perPersonaHtml(all, bs) : ""}
+  ${coppia() ? `<div class="chips" role="group" aria-label="Filtra per persona">${[["tutti", "Tutti"], ...CHI()].map(([k, l]) => `<button class="chip sm ${FILTRO === k ? "on" : ""}" data-filtro="${k}" aria-pressed="${FILTRO === k}">${esc(l)}</button>`).join("")}</div>` : ""}
+  ${cats.length ? `<h2 class="s">Dove sono andati${coppia() && FILTRO !== "tutti" ? ` <span class="small" style="font-size:14px">${esc(nomeChi(FILTRO))} · ${fmt2(fSpent)}</span>` : ""}</h2><div class="card">${cats.map(([c, v], i) => `<div style="margin:6px 0 10px"><div class="row" style="font-weight:800;font-size:14px"><span>${esc(c)}</span><span>${fmt2(v)}</span></div><div class="bar thin" style="margin-top:4px"><i style="width:${fSpent ? v / fSpent * 100 : 0}%;background:${["#3DAA6B","#FF8A5C","#9B7BE0","#2FB3C9","#EC6F9A","#E8A90C","#9AA6B2","#C9BCC2"][i % 8]}"></i></div></div>`).join("")}</div>` : ""}
   ${tip ? tipHtml(tip) : ""}
   <h2 class="s">Movimenti <button class="mini" data-a="addSpesa">+ Spesa</button></h2>
-  ${sp.length ? Object.keys(days).sort().reverse().map(d => `<div class="row" style="padding:8px 4px 6px;font-weight:800;font-size:14px;color:var(--text2)"><span>${label(d)}</span><span>${fmt2(sum(days[d], s => s.importo))}</span></div>
-    <div class="list">${days[d].map(s => { const ci = Math.max(0, S.categorie.indexOf(s.cat)); return `<button class="item" data-edit="${s.id}"><div class="dot" style="background:${CAT_TINT[ci % CAT_TINT.length]}">${esc((s.nome || s.cat).charAt(0).toUpperCase())}</div><div class="grow"><b>${esc(s.nome || s.cat)}</b><span class="small">${esc(s.cat)}</span></div><span class="amt">${fmt2(s.importo)}</span></button>`; }).join("")}</div>`).join("")
-    : `<div class="card center small">Nessuna spesa in questa settimana.<br>Usa i tasti rapidi nella Home: basta un tocco.</div>`}
+  ${filt.length ? Object.keys(days).sort().reverse().map(d => `<div class="row" style="padding:8px 4px 6px;font-weight:800;font-size:14px;color:var(--text2)"><span>${label(d)}</span><span>${fmt2(sum(days[d], s => s.importo))}</span></div>
+    <div class="list">${days[d].map(s => { const ci = Math.max(0, S.categorie.indexOf(s.cat)); return `<button class="item" data-edit="${s.id}"><div class="dot" style="background:${CAT_TINT[ci % CAT_TINT.length]}">${esc((s.nome || s.cat).charAt(0).toUpperCase())}</div><div class="grow"><b>${esc(s.nome || s.cat)}</b><span class="small">${esc(s.cat)}${coppia() ? ` · <span class="who">${esc(nomeChi(chiDi(s)))}</span>` : ""}</span></div><span class="amt">${fmt2(s.importo)}</span></button>`; }).join("")}</div>`).join("")
+    : `<div class="card center small">Nessuna spesa ${coppia() && FILTRO !== "tutti" ? "di " + esc(nomeChi(FILTRO)) + " " : ""}in questa settimana.<br>Usa i tasti rapidi nella Home: basta un tocco.</div>`}
   <button class="btn line" data-a="addExtra" style="margin-top:18px">+ Entrata extra (tredicesima, premio, 730…)</button>`;
+}
+function perPersonaHtml(sp, bs) {
+  return `<h2 class="s">Per persona</h2><div class="card">${CHI().map(([k, l]) => {
+    const v = sum(sp.filter(s => chiDi(s) === k), s => s.importo), b = budgetPersona(k, bs);
+    return `<div style="margin:6px 0 10px"><div class="row" style="font-weight:800;font-size:14px"><span>${esc(l)}${k === "ins" ? " (cassa comune)" : ""}</span><span>${fmt2(v)}${b ? ` <span class="small">su ${fmt(b)}</span>` : ""}</span></div>
+      ${b ? `<div class="bar thin ${v > b ? "over" : ""}" style="margin-top:4px"><i style="width:${clamp(v / b * 100, 0, 100)}%"></i></div>` : ""}</div>`; }).join("")}
+    ${!S.budgetPers.p1 && !S.budgetPers.p2 ? `<p class="small" style="margin:0">Volete un budget a testa? Impostatelo nelle impostazioni: il resto va nella cassa comune.</p>` : ""}</div>`;
 }
 
 /* ---------- PIANO ---------- */
+function vociHtml(kind) {
+  const l = kind === "casa" ? S.casa : S.abbonamenti, m = meseCorrente();
+  const sugg = (kind === "casa" ? CASA_SUGG : ABB_SUGG).filter(([n]) => !l.some(v => v.nome.toLowerCase() === n.toLowerCase()));
+  const rows = l.slice().sort((a, b) => (prossima(a) || 0) - (prossima(b) || 0)).map(v => { const p = prossima(v), f = +v.freq || 1;
+    return `<button class="item" data-voce="${kind}|${v.id}"><div class="dot" style="background:${kind === "casa" ? "#FFDCCB" : "#E7DEFA"}">${esc(v.nome.charAt(0).toUpperCase())}</div>
+    <div class="grow"><b>${esc(v.nome)}</b><span class="small">${freqTxt(f)}${p ? ` · ${kind === "abb" ? "si rinnova il" : f === 1 ? "il" : "prossima"} ${dataBreve(p)}` : ""}${coppia() ? ` · <span class="who">${esc(nomeChi(v.chi || "ins"))}</span>` : ""}</span></div>
+    <span class="amt">${fmt2(v.importo)}</span></button>`; }).join("");
+  return `${rows ? `<div class="list">${rows}</div>` : ""}
+    ${sugg.length ? `<div class="chips">${sugg.map(([n]) => `<button class="chip sm" data-addvoce="${kind}|${esc(n)}">+ ${esc(n)}</button>`).join("")}</div>` : ""}`;
+}
+function debitoCard(d, i, evidenzia) {
+  const x = info(d), chiuso = x.chiuso, ini = d.saldoIniziale || x.eff;
+  let sotto = "", fine = "", restano = "", barra = 0;
+  if (x.aRate) {
+    sotto = `Rata ${fmt(x.R)}${x.n != null && !chiuso ? ` · ${x.n} rate rimaste` : ""}${x.tasso != null && x.tasso > 0 ? ` · tasso stimato ${String(x.tasso).replace(".", ",")}%` : ""}`;
+    fine = chiuso ? "Chiuso!" : x.senzaFine ? "Aggiungi l'ultima rata" : `Ultima rata ${meseAnno(parse(d.fine))}`;
+    restano = chiuso ? "Pagato tutto" : x.saldo != null ? `Restano ${fmt(x.saldo)}` : x.totRate ? `Restano ${fmt(x.totRate)} in rate` : "Tocca per completare";
+    barra = chiuso ? 100 : x.N ? (1 - x.n / x.N) * 100 : +d.importo > 0 && x.saldo != null ? (1 - x.saldo / d.importo) * 100 : null;
+  } else {
+    const n = mesiCarta(d);
+    sotto = `${d.tasso == null ? "Tasso da inserire" : `Tasso ${String(d.tasso).replace(".", ",")}%`}${d.rata ? ` · rata ${fmt(d.rata)}` : ""}${isCaro(d) ? ` · circa ${fmt(interessiMese(d))} di interessi al mese` : ""}`;
+    fine = chiuso ? "Chiuso!" : n === null ? "Rata libera" : n === Infinity ? "La rata copre solo gli interessi" : `Chiuso a ${meseFra(n)}`;
+    restano = chiuso ? "Pagato tutto" : `Restano ${fmt(x.saldo)}`;
+    barra = chiuso ? 100 : ini > 0 ? (1 - x.saldo / ini) * 100 : 0;
+  }
+  const dettaglio = x.aRate && !chiuso && x.intRata != null ? `<p class="small" style="margin:8px 0 0">Di questa rata: circa <b>${fmt(x.intRata)}</b> di interessi e <b>${fmt(x.R - x.intRata)}</b> di capitale. Interessi ancora da pagare: circa ${fmt(x.intTot)}.</p>`
+    : x.aRate && !chiuso && !x.senzaFine ? `<p class="small" style="margin:8px 0 0">Aggiungi il debito residuo per vedere quanto paghi di interessi.</p>` : "";
+  return `<button class="card" data-deb="${d.id}" style="display:block;width:100%;border:${evidenzia ? "2px solid var(--accent)" : "0"};text-align:left;padding:14px 16px;margin:10px 0">
+    <div class="row"><div class="row" style="gap:10px;min-width:0"><div class="dot" style="width:30px;height:30px;font-size:14px;background:${chiuso ? "var(--goodbg)" : CAT_TINT[i % CAT_TINT.length]}">${chiuso ? "✓" : i + 1}</div>
+    <div class="col" style="min-width:0"><b style="font-size:15px">${esc(d.nome)}${coppia() ? ` <span class="who">· ${esc(nomeChi(d.chi || "ins"))}</span>` : ""}</b><span class="small">${sotto}</span></div></div>
+    ${evidenzia ? '<span class="tag" style="background:var(--piggy)">Prima questo</span>' : ""}</div>
+    ${barra == null ? '<div style="height:10px"></div>' : `<div class="bar thin" style="margin:10px 0 6px"><i style="width:${clamp(barra, 0, 100)}%"></i></div>`}
+    <div class="row small" style="font-weight:700"><span>${restano}</span><span>${fine}</span></div>${dettaglio}</button>`;
+}
 function vPiano() {
-  const deb = ordineDebiti(), firstOpen = deb.find(d => d.saldo > 0 && d.tipo !== "mutuo");
+  const deb = ordineDebiti(), firstOpen = deb.find(d => !info(d).chiuso && d.tipo !== "mutuo");
   const sm = speseMese(), f1 = sm, f3 = sm * mesiTarget(), fs = S.fondo.saldo;
   const target = fs < f1 ? f1 : f3, avz = Math.max(0, avanzo()), cari = debitiCari().length > 0;
-  const lv = S.livello.max;
+  const lv = S.livello.max, m = meseCorrente();
   const prossime = S.scadenze.filter(s => !s.fatto).sort((a, b) => (a.data || "9").localeCompare(b.data || "9"));
   const fatte = S.scadenze.filter(s => s.fatto);
+  const abbM = mediaMese(S.abbonamenti);
   return `
-  <h1 class="t">Piano</h1><p class="sub">Debiti, fondo, obiettivi e scadenze.</p>
-  <h2 class="s">Debiti <button class="mini" data-a="addDebito">+ Debito</button></h2>
+  <h1 class="t">Piano</h1><p class="sub">Dove vanno i soldi ogni mese, poi debiti, fondo e obiettivi.</p>
+
+  <h2 class="s"><span>Casa</span><button class="mini" data-addvoce="casa|">+ Voce</button></h2>
+  <p class="small" style="margin:-4px 0 8px">Questo mese ${fmt(uscitaIn(S.casa, m))} · in media ${fmt(mediaMese(S.casa))} al mese. Ogni bolletta pesa nel mese in cui arriva. Il mutuo è in Rate e debiti.</p>
+  ${vociHtml("casa")}
+
+  <h2 class="s"><span>Abbonamenti</span><button class="mini" data-addvoce="abb|">+ Nuovo</button></h2>
+  <p class="small" style="margin:-4px 0 8px">${S.abbonamenti.length ? `Circa ${fmt(abbM)} al mese, ${fmt(abbM * 12)} all'anno.` : "Telefono, streaming, palestra: con la data di rinnovo ti ricordiamo di disdire quelli che non usi."}</p>
+  ${vociHtml("abb")}
+
+  <h2 class="s"><span>Rate e debiti</span><button class="mini" data-a="addDebito">+ Nuovo</button></h2>
   ${deb.length ? `<p class="small" style="margin:-4px 0 8px">Nell'ordine consigliato: prima i più cari, il mutuo per ultimo.</p>` : ""}
-  ${deb.map((d, i) => { const n = mesiAllaChiusura(d), chiuso = d.saldo <= 0, ini = d.saldoIniziale || d.saldo;
-    const fine = chiuso ? "Chiuso!" : n === null ? "Rata libera" : n === Infinity ? "La rata copre solo gli interessi" : `Chiuso a ${meseFra(n)}`;
-    return `<button class="card" data-deb="${d.id}" style="display:block;width:100%;border:${d === firstOpen && cari ? "2px solid var(--accent)" : "0"};text-align:left;padding:14px 16px;margin:10px 0">
-      <div class="row"><div class="row" style="gap:10px;min-width:0"><div class="dot" style="width:30px;height:30px;font-size:14px;background:${chiuso ? "var(--goodbg)" : CAT_TINT[i % CAT_TINT.length]}">${chiuso ? "✓" : i + 1}</div>
-      <div class="col" style="min-width:0"><b style="font-size:15px">${esc(d.nome)}</b><span class="small">${d.tasso == null ? "Tasso da inserire" : `Tasso ${String(d.tasso).replace(".", ",")}%`}${d.rata ? ` · rata ${fmt(d.rata)}` : ""}${isCaro(d) ? ` · circa ${fmt(interessiMese(d))} di interessi al mese` : ""}</span></div></div>
-      ${d === firstOpen && cari ? '<span class="tag" style="background:var(--piggy)">Prima questo</span>' : ""}</div>
-      <div class="bar thin" style="margin:10px 0 6px"><i style="width:${ini > 0 ? clamp((1 - d.saldo / ini) * 100, 0, 100) : 100}%"></i></div>
-      <div class="row small" style="font-weight:700"><span>${chiuso ? "Pagato tutto" : `Restano ${fmt(d.saldo)}`}</span><span>${fine}</span></div></button>`; }).join("") || `<div class="card small center">Nessun debito inserito. Ottimo!</div>`}
+  ${deb.map((d, i) => debitoCard(d, i, d === firstOpen && cari)).join("") || `<div class="card small center">Nessuna rata o debito. Ottimo!</div>`}
 
   <h2 class="s">Fondo di emergenza</h2>
   <button class="card" data-a="fondo" style="display:block;width:100%;border:0;text-align:left">
     <div class="row" style="align-items:baseline"><span class="mid">${fmt(fs)}</span><span class="small">obiettivo ${fs < f1 ? "1 mese" : mesiTarget() + " mesi"}: ${fmt(target)}</span></div>
     <div class="bar" style="margin:8px 0"><i style="width:${target ? clamp(fs / target * 100, 0, 100) : 0}%"></i></div>
-    <span class="small">${fs >= f3 ? "Fondo pieno: gli imprevisti fanno meno paura." : `Copre ${fondoMesi().toFixed(1).replace(".", ",")} mesi di spese. Tocca per aggiornarlo.`}</span></button>
+    <span class="small">${fs >= f3 && f3 > 0 ? "Fondo pieno: gli imprevisti fanno meno paura." : `Copre ${dec(fondoMesi())} mesi di spese. Tocca per aggiornarlo.`}</span></button>
 
   <h2 class="s">Obiettivi <button class="mini" data-a="addObiettivo">+ Nuovo</button></h2>
   ${S.obiettivi.filter(o => !o.grande).map(o => objCard(o, avz, cari)).join("") || `<div class="card small">Vacanza, auto, regali: crea un obiettivo e guardalo crescere.</div>`}
@@ -696,8 +973,8 @@ function vPiano() {
   <div class="list">${prossime.map(scadRow).join("") || `<div class="item small" style="justify-content:center">Niente in scadenza.</div>`}</div>
   ${fatte.length ? `<details style="margin-top:10px"><summary class="small" style="cursor:pointer;min-height:36px;display:flex;align-items:center">Fatte (${fatte.length})</summary><div class="list" style="margin-top:6px">${fatte.map(scadRow).join("")}</div></details>` : ""}
   <button class="btn ghost" data-a="calendario">${ico("cal", 2.2).replace("<svg", '<svg width="20" height="20"')} Aggiungi al calendario</button>
-  <p class="small center" style="margin-top:6px">Giorno di paga e check di 5 minuti la domenica, come promemoria del telefono.</p>
-  <p class="disc">Cipignolo ti dà numeri e idee, le decisioni restano tue.</p>`;
+  <p class="small center" style="margin-top:6px">Giorno di paga, bollette, rinnovi e check di 5 minuti la domenica, come promemoria del telefono.</p>
+  <p class="disc">Cipignolo ti dà numeri e idee, le decisioni restano tue. Tassi e interessi calcolati dall'app sono stime.</p>`;
 }
 function objCard(o, avz, cari) {
   const pc = o.target > 0 ? clamp(o.saldo / o.target * 100, 0, 100) : 0;
@@ -719,7 +996,7 @@ function scadRow(s) {
     <div style="width:48px;flex:none;display:flex;flex-direction:column;align-items:center;background:${late ? "var(--warnbg)" : "var(--bg)"};border-radius:12px;padding:4px 0">
       <span style="font-family:var(--head);font-weight:700;font-size:18px;line-height:1.1">${d ? d.getDate() : "–"}</span><span style="font-size:11px;font-weight:800;color:var(--text2)">${d ? MESI_B[d.getMonth()].toUpperCase() + (d.getFullYear() !== today().getFullYear() ? " " + String(d.getFullYear()).slice(2) : "") : ""}</span></div>
     <div class="grow"><b style="white-space:normal;${s.fatto ? "text-decoration:line-through;color:var(--muted)" : ""}">${esc(s.titolo)}</b>${late ? '<span class="small" style="color:var(--warn)">Da recuperare</span>' : ""}</div>
-    <button class="ibtn" data-delscad="${s.id}" aria-label="Elimina scadenza" style="box-shadow:none;width:36px;height:36px;background:transparent">${ico("plus", 2, "#6B5560").replace("<svg", '<svg style="transform:rotate(45deg)"')}</button></label>`;
+    <button class="ibtn" data-delscad="${s.id}" aria-label="Elimina scadenza" style="box-shadow:none;width:36px;height:36px;background:transparent">${xIco("#6B5560")}</button></label>`;
 }
 
 /* ---------- TRAGUARDI ---------- */
@@ -743,13 +1020,18 @@ function vTraguardi() {
    AZIONI
    ========================================================= */
 document.addEventListener("click", e => {
-  const t = e.target.closest("[data-tab],[data-a],[data-q],[data-edit],[data-deb],[data-obj],[data-delscad],[data-medal]");
+  const t = e.target.closest("[data-tab],[data-a],[data-q],[data-edit],[data-deb],[data-obj],[data-delscad],[data-medal],[data-voce],[data-addvoce],[data-chiat],[data-filtro]");
   if (!t || !S.setup) return;
+  if (t.closest("#bd") && !t.dataset.a) return;
   if (t.dataset.tab) { VIEW = t.dataset.tab; WEEK = 0; render(); window.scrollTo(0, 0); return; }
   if (t.dataset.q) return tapRapido(t.dataset.q);
   if (t.dataset.edit) return editSpesa(t.dataset.edit);
   if (t.dataset.deb) return editDebito(t.dataset.deb);
   if (t.dataset.obj) return editObiettivo(t.dataset.obj);
+  if (t.dataset.chiat) { S.chiAttivo = t.dataset.chiat; save(); render(); return; }
+  if (t.dataset.filtro) { FILTRO = t.dataset.filtro; render(); return; }
+  if (t.dataset.voce) { const [k, id] = t.dataset.voce.split("|"); return editVoce(k, id); }
+  if (t.dataset.addvoce != null) { const [k, n] = t.dataset.addvoce.split("|"); return editVoce(k, null, n); }
   if (t.dataset.medal) { const m = MEDALS.find(x => x.id === t.dataset.medal); return toast(`${m.n}: ${m.d}${S.medaglie[m.id] ? " · ottenuta il " + parse(S.medaglie[m.id]).toLocaleDateString("it-IT") : ""}`); }
   if (t.dataset.delscad) { e.preventDefault(); const s = S.scadenze.find(x => x.id === t.dataset.delscad); const i = S.scadenze.indexOf(s); S.scadenze.splice(i, 1); return commit("Scadenza eliminata", () => { S.scadenze.splice(i, 0, s); commit(); }); }
   const a = t.dataset.a;
@@ -763,11 +1045,12 @@ document.addEventListener("change", e => {
 });
 
 function addSpesaRecord(sp) {
-  S.spese.push(sp); commit(`${sp.nome || sp.cat}: segnati ${fmt2(sp.importo)}`, () => { S.spese = S.spese.filter(x => x.id !== sp.id); commit(); });
+  S.spese.push(sp);
+  commit(`${sp.nome || sp.cat}: segnati ${fmt2(sp.importo)}${coppia() ? " · " + nomeChi(sp.chi) : ""}`, () => { S.spese = S.spese.filter(x => x.id !== sp.id); commit(); });
 }
 function tapRapido(id) {
   const r = S.rapidi.find(x => x.id === id); if (!r) return;
-  const base = { id:uid(), data:iso(today()), cat:r.cat, nome:r.nome, ts:Date.now() };
+  const base = { id:uid(), data:iso(today()), cat:r.cat, nome:r.nome, ts:Date.now(), chi: coppia() ? (S.chiAttivo || "p1") : "p1" };
   if (r.tipo !== "libero" && r.prezzo != null) return addSpesaRecord({ ...base, importo:r.prezzo });
   if (r.tipo === "chiedi") {
     return sheet(`<h3>${esc(r.nome)}</h3><p class="sub">Quanto spendi di solito? Lo chiediamo solo questa volta, poi basta un tocco.</p>${moneyField("p", "", "Prezzo")}<button class="btn" id="ok">Salva e segna</button>`, b => {
@@ -779,27 +1062,60 @@ function tapRapido(id) {
     $("#ok", b).onclick = go; $("#p", b).onkeydown = ev => { if (ev.key === "Enter") go(); };
   });
 }
+function bindChi(b, init, attr = "data-chi") {
+  let v = init;
+  b.querySelectorAll(`[${attr}]`).forEach(x => x.onclick = () => { v = x.getAttribute(attr); b.querySelectorAll(`[${attr}]`).forEach(y => { y.classList.toggle("on", y === x); y.setAttribute("aria-pressed", y === x); }); });
+  return () => v;
+}
 function editSpesa(id) {
   const s = id ? S.spese.find(x => x.id === id) : null; let cat = s ? s.cat : S.categorie[0];
+  const chi0 = s ? chiDi(s) : (S.chiAttivo || "p1");
   sheet(`<h3>${s ? "Modifica spesa" : "Nuova spesa"}</h3>${moneyField("p", s ? s.importo : "", "Importo")}
+    ${coppia() ? `<label class="f">Chi ha speso</label>${chiChips(chi0)}` : ""}
     <label class="f">Categoria</label><div class="chips" id="cc">${S.categorie.map(c => `<button class="chip ${c === cat ? "on" : ""}" data-c="${esc(c)}">${esc(c)}</button>`).join("")}</div>
     <label class="f" for="nn">Nota (facoltativa)</label><input class="in" id="nn" value="${esc(s ? s.nome : "")}" placeholder="es. spesa al mercato">
     <label class="f" for="dd">Data</label><input class="in" id="dd" type="date" value="${s ? s.data : iso(today())}">
     <button class="btn" id="ok">${s ? "Salva" : "Aggiungi"}</button>${s ? '<button class="btn danger" id="del">Elimina spesa</button>' : ""}`, b => {
+    const getChi = bindChi(b, chi0);
     b.querySelectorAll("[data-c]").forEach(x => x.onclick = () => { cat = x.dataset.c; b.querySelectorAll("[data-c]").forEach(y => y.classList.toggle("on", y === x)); });
     $("#ok", b).onclick = () => { const v = num($("#p", b).value); if (!(v > 0)) return toast("Scrivi un importo");
-      const rec = { id:s ? s.id : uid(), importo:Math.round(v * 100) / 100, cat, nome:$("#nn", b).value.trim(), data:$("#dd", b).value || iso(today()), ts:s ? s.ts : Date.now() };
+      const rec = { id:s ? s.id : uid(), importo:Math.round(v * 100) / 100, cat, nome:$("#nn", b).value.trim(), data:$("#dd", b).value || iso(today()), ts:s ? s.ts : Date.now(), chi: coppia() ? getChi() : "p1" };
       closeSheet(); if (s) { Object.assign(s, rec); commit("Spesa aggiornata"); } else addSpesaRecord(rec); };
     if (s) $("#del", b).onclick = () => { const i = S.spese.indexOf(s); S.spese.splice(i, 1); closeSheet(); commit("Spesa eliminata", () => { S.spese.splice(i, 0, s); commit(); }); };
+  });
+}
+/* voce di Casa o Abbonamento */
+function editVoce(kind, id, nomePre) {
+  const l = kind === "casa" ? S.casa : S.abbonamenti, v = id ? l.find(x => x.id === id) : null;
+  const sugg = kind === "casa" ? CASA_SUGG : ABB_SUGG;
+  let freq = v ? +v.freq || 1 : freqDi(nomePre || "", sugg);
+  const chi0 = v ? (v.chi || "ins") : "ins";
+  sheet(`<h3>${v ? esc(v.nome) : kind === "casa" ? "Nuova voce di casa" : "Nuovo abbonamento"}</h3>
+    <label class="f" for="vn">Nome</label><input class="in" id="vn" value="${esc(v ? v.nome : nomePre || "")}" placeholder="${kind === "casa" ? "es. Luce" : "es. Netflix"}">
+    ${moneyField("vi", v ? v.importo : "", kind === "casa" ? "Importo (l'ultima bolletta va benissimo)" : "Prezzo")}
+    <label class="f">Ogni quanto</label><div class="chips">${FREQ.map(([k, t]) => `<button type="button" class="chip sm ${k === freq ? "on" : ""}" data-fq="${k}">${t}</button>`).join("")}</div>
+    <label class="f" for="vd">${kind === "casa" ? "Prossima scadenza (o l'ultima pagata)" : "Si rinnova il"}</label><input class="in" id="vd" type="date" value="${v ? v.data : (freq === 1 && kind === "casa" ? iso(new Date(today().getFullYear(), today().getMonth(), 1)) : dataDefault())}">
+    ${coppia() ? `<label class="f">Chi paga</label>${chiChips(chi0)}` : ""}
+    <p class="small">Pesa nel mese in cui arriva: ${kind === "casa" ? "ti avvisiamo il mese prima se il budget sarà più basso." : "qualche giorno prima ti chiediamo se lo usi ancora."}</p>
+    <button class="btn" id="ok">Salva</button>${v ? '<button class="btn danger" id="del">Elimina</button>' : ""}`, b => {
+    const getChi = bindChi(b, chi0);
+    b.querySelectorAll("[data-fq]").forEach(x => x.onclick = () => { freq = +x.dataset.fq; b.querySelectorAll("[data-fq]").forEach(y => y.classList.toggle("on", y === x)); });
+    $("#ok", b).onclick = () => { const importo = num($("#vi", b).value); if (!(importo > 0)) return toast("Scrivi un importo");
+      const rec = { nome:$("#vn", b).value.trim() || (kind === "casa" ? "Voce di casa" : "Abbonamento"), importo:Math.round(importo * 100) / 100, freq, data:$("#vd", b).value || dataDefault(), chi: coppia() ? getChi() : "ins" };
+      if (v) Object.assign(v, rec); else l.push({ id:uid(), ...rec });
+      closeSheet(); commit(v ? "Aggiornato" : `${rec.nome} aggiunto`); };
+    if (v) $("#del", b).onclick = () => { const i = l.indexOf(v); l.splice(i, 1); closeSheet(); commit(`${v.nome} eliminato`, () => { l.splice(i, 0, v); commit(); }); };
   });
 }
 function addExtra() {
   sheet(`<h3>Entrata extra</h3><p class="sub">Tredicesima, premio, rimborso del 730, straordinari…</p>
     <label class="f" for="en">Cos'è</label><input class="in" id="en" placeholder="es. Tredicesima">${moneyField("ei", "", "Quanto")}
+    ${coppia() ? `<label class="f">Di chi</label>${chiChips("p1")}` : ""}
     <div class="tip" style="margin-top:16px"><svg viewBox="0 0 24 24" fill="none" stroke="#8A5A00" stroke-width="2" stroke-linecap="round" aria-hidden="true">${ICON.bulb}</svg><p>La regola d'oro: <b>metà al piano, metà a te</b>. Il piano è il fondo o il debito più caro.</p></div>
     <button class="btn" id="half">Metà al fondo, metà a me</button><button class="btn ghost" id="only">Segna e decido dopo</button>`, b => {
+    const getChi = bindChi(b, "p1");
     const go = split => { const imp = num($("#ei", b).value); if (!(imp > 0)) return toast("Scrivi un importo");
-      const x = { id:uid(), data:iso(today()), nome:$("#en", b).value.trim() || "Entrata extra", importo:imp, diviso:split };
+      const x = { id:uid(), data:iso(today()), nome:$("#en", b).value.trim() || "Entrata extra", importo:imp, diviso:split, chi: coppia() ? getChi() : "p1" };
       S.extra.push(x); if (split) setFondo(S.fondo.saldo + imp / 2); closeSheet();
       commit(split ? `${fmt(imp / 2)} al fondo, ${fmt(imp / 2)} per te. Bravo!` : "Entrata segnata"); };
     $("#half", b).onclick = () => go(true); $("#only", b).onclick = () => go(false);
@@ -817,23 +1133,63 @@ function editFondo() {
       commit(dip ? "Il fondo ha fatto il suo lavoro. Ora lo ricostruiamo." : "Fondo aggiornato"); };
   });
 }
+/* rate e debiti: mutuo/prestito con rata + ultima rata; carte con saldo e tasso */
 function editDebito(id) {
   const d = id ? S.debiti.find(x => x.id === id) : null;
-  const tipi = [["carta","Carta"],["prestito","Prestito"],["mutuo","Mutuo"],["altro","Altro"]]; let tipo = d ? d.tipo : "carta";
-  sheet(`<h3>${d ? "Aggiorna debito" : "Nuovo debito"}</h3>
-    <label class="f" for="dn">Nome</label><input class="in" id="dn" value="${esc(d ? d.nome : "")}" placeholder="es. Carta revolving">
-    <label class="f">Tipo</label><div class="chips">${tipi.map(([k, l]) => `<button class="chip ${k === tipo ? "on" : ""}" data-t="${k}">${l}</button>`).join("")}</div>
-    ${moneyField("ds", d ? d.saldo : "", "Quanto resta da pagare")}
-    ${moneyField("dr", d ? d.rata : "", "Rata al mese (0 se paghi quando puoi)")}
-    <label class="f" for="dt">Tasso annuo % (facoltativo)</label><input class="in" id="dt" inputmode="decimal" value="${d && d.tasso != null ? String(d.tasso).replace(".", ",") : ""}" placeholder="es. 14">
-    <p class="small">Lo trovi nell'estratto conto o nel contratto (TAN o TAEG). Ci aiuta a capire quale chiudere prima.</p>
-    <button class="btn" id="ok">Salva</button>${d ? '<button class="btn danger" id="del">Elimina debito</button>' : ""}`, b => {
-    b.querySelectorAll("[data-t]").forEach(x => x.onclick = () => { tipo = x.dataset.t; b.querySelectorAll("[data-t]").forEach(y => y.classList.toggle("on", y === x)); });
-    $("#ok", b).onclick = () => { const nome = $("#dn", b).value.trim() || "Debito"; const saldo = num($("#ds", b).value), rata = num($("#dr", b).value), tasso = numOrNull($("#dt", b).value);
-      if (d) { Object.assign(d, { nome, tipo, saldo, rata, tasso }); if (saldo > (d.saldoIniziale || 0)) d.saldoIniziale = saldo; }
-      else S.debiti.push({ id:uid(), nome, tipo, saldo, saldoIniziale:saldo, rata, tasso, creato:iso(today()) });
-      closeSheet(); commit(d && saldo <= 0 ? `${nome} chiuso! Che soddisfazione.` : "Debito salvato"); };
-    if (d) $("#del", b).onclick = () => { S.debiti = S.debiti.filter(x => x !== d); closeSheet(); commit("Debito eliminato"); };
+  const tipi = [["mutuo","Mutuo"],["prestito","Prestito o finanziamento"],["carta","Carta"],["altro","Altro debito"]];
+  const V = { tipo: d ? d.tipo : "prestito", nome: d ? d.nome : "", rata: d ? d.rata : "", fine: d && d.fine || "", residuo: d && d.residuo != null ? d.residuo : "",
+    importo: d && d.importo != null ? d.importo : "", inizio: d && d.inizio || "", saldo: d && !aRate(d) ? d.saldo : "", tasso: d && d.tasso != null && !aRate(d) ? d.tasso : "" };
+  const chi0 = d ? (d.chi || "ins") : "ins";
+  const campi = () => aRate(V) ? `
+      ${moneyField("dr", V.rata, "Rata al mese")}
+      <label class="f" for="df">Data dell'ultima rata</label><input class="in" id="df" type="date" value="${esc(V.fine)}">
+      <p class="small">Rata e ultima rata le trovi nel contratto o nell'app della banca: sono i dati certi, così la data di fine è sempre giusta.</p>
+      <details class="more" ${V.residuo !== "" || V.importo !== "" ? "open" : ""}><summary>Vuoi vedere gli interessi? (facoltativo)</summary>
+        <p class="small" style="margin:0">Basta uno dei due: il resto lo calcoliamo noi (tasso stimato, quota interessi e capitale).</p>
+        ${moneyField("dres", V.residuo, "Debito residuo di oggi")}
+        <p class="small center" style="margin:10px 0 0">oppure</p>
+        ${moneyField("dimp", V.importo, "Importo iniziale del prestito")}
+        <label class="f" for="dini">Data della prima rata</label><input class="in" id="dini" type="date" value="${esc(V.inizio)}">
+      </details>`
+    : `${moneyField("ds", V.saldo, "Quanto resta da pagare")}
+      ${moneyField("dr", V.rata, "Rata al mese (0 se paghi quando puoi)")}
+      <label class="f" for="dt">Tasso annuo % (facoltativo)</label><input class="in" id="dt" inputmode="decimal" value="${esc(valStr(V.tasso))}" placeholder="es. 14">
+      <p class="small">Lo trovi nell'estratto conto o nel contratto (TAN o TAEG). Ci aiuta a capire quale chiudere prima.</p>`;
+  sheet(`<h3>${d ? "Aggiorna" : "Nuova rata o debito"}</h3>
+    <label class="f">Tipo</label><div class="chips">${tipi.map(([k, l]) => `<button type="button" class="chip sm ${k === V.tipo ? "on" : ""}" data-t="${k}">${l}</button>`).join("")}</div>
+    <label class="f" for="dn">Nome</label><input class="in" id="dn" value="${esc(V.nome)}" placeholder="es. Prestito auto">
+    <div id="campi">${campi()}</div>
+    ${coppia() ? `<label class="f">Di chi</label>${chiChips(chi0)}` : ""}
+    <button class="btn" id="ok">Salva</button>
+    ${d && aRate(d) && !info(d).chiuso ? '<button class="btn ghost" id="chiudi">L\'ho chiuso in anticipo</button>' : ""}
+    ${d ? '<button class="btn danger" id="del">Elimina</button>' : ""}`, b => {
+    const getChi = bindChi(b, chi0);
+    const leggi = () => {
+      V.nome = $("#dn", b).value; V.rata = $("#dr", b) ? $("#dr", b).value : V.rata;
+      if ($("#df", b)) { V.fine = $("#df", b).value; V.residuo = $("#dres", b).value; V.importo = $("#dimp", b).value; V.inizio = $("#dini", b).value; }
+      if ($("#ds", b)) { V.saldo = $("#ds", b).value; V.tasso = $("#dt", b).value; }
+    };
+    b.querySelectorAll("[data-t]").forEach(x => x.onclick = () => { leggi(); V.tipo = x.dataset.t; b.querySelectorAll("[data-t]").forEach(y => y.classList.toggle("on", y === x)); $("#campi", b).innerHTML = campi(); });
+    $("#ok", b).onclick = () => { leggi();
+      const nome = V.nome.trim() || (V.tipo === "mutuo" ? "Mutuo" : V.tipo === "carta" ? "Carta" : "Debito");
+      let rec;
+      if (aRate(V)) {
+        const rata = num(V.rata); if (!(rata > 0)) return toast("Scrivi la rata al mese");
+        const residuo = numOrNull(V.residuo), importo = numOrNull(V.importo);
+        rec = { nome, tipo:V.tipo, rata, fine:V.fine || null, residuo: residuo || null,
+          residuoData: residuo ? (d && +d.residuo === residuo && d.residuoData ? d.residuoData : iso(today())) : null,
+          importo: importo || null, inizio: V.inizio || null, saldo:null, tasso:null, chiuso:false };
+      } else {
+        rec = { nome, tipo:V.tipo, saldo:num(V.saldo), rata:num(V.rata), tasso:numOrNull(V.tasso), fine:null, residuo:null, importo:null, inizio:null, chiuso:false };
+      }
+      rec.chi = coppia() ? getChi() : "ins";
+      const wasOpen = d ? !info(d).chiuso : true;
+      let x = d;
+      if (d) Object.assign(d, rec); else { x = { id:uid(), creato:iso(today()), ...rec }; S.debiti.push(x); }
+      const eff = info(x).eff; if (!x.saldoIniziale || eff > x.saldoIniziale) x.saldoIniziale = eff;
+      closeSheet(); commit(d && wasOpen && info(x).chiuso ? `${nome} chiuso! Che soddisfazione.` : "Salvato"); };
+    if ($("#chiudi", b)) $("#chiudi", b).onclick = () => { d.chiuso = true; closeSheet(); commit(`${d.nome} chiuso! Che soddisfazione.`); };
+    if (d) $("#del", b).onclick = () => { const i = S.debiti.indexOf(d); S.debiti.splice(i, 1); closeSheet(); commit("Eliminato", () => { S.debiti.splice(i, 0, d); commit(); }); };
   });
 }
 function editObiettivo(id, grande) {
@@ -851,7 +1207,7 @@ function editObiettivo(id, grande) {
   });
 }
 function addScad() {
-  sheet(`<h3>Nuova scadenza</h3><label class="f" for="st">Cosa fare</label><input class="in" id="st" placeholder="es. Pagare la TARI"><label class="f" for="sd">Entro il</label><input class="in" id="sd" type="date" value="${iso(today())}"><button class="btn" id="ok">Aggiungi</button>`, b => {
+  sheet(`<h3>Nuova scadenza</h3><label class="f" for="st">Cosa fare</label><input class="in" id="st" placeholder="es. Rinnovare l'assicurazione"><label class="f" for="sd">Entro il</label><input class="in" id="sd" type="date" value="${iso(today())}"><button class="btn" id="ok">Aggiungi</button>`, b => {
     $("#ok", b).onclick = () => { const titolo = $("#st", b).value.trim(); if (!titolo) return toast("Scrivi cosa fare"); S.scadenze.push({ id:uid(), titolo, data:$("#sd", b).value, fatto:false }); closeSheet(); commit("Scadenza aggiunta"); };
   });
 }
@@ -872,21 +1228,23 @@ function celebraLivello(k, from) {
     <button class="btn" id="ok">${first ? "Andiamo" : "Evviva!"}</button>`, b => { $("#ok", b).onclick = () => closeSheet(); });
 }
 
-/* ---------- Chiedi a un'AI ---------- */
+/* ---------- Chiedi a un'AI (solo numeri, niente nomi né nickname) ---------- */
 function riassuntoAI() {
   const tipoNome = { carta:"Carta di credito", prestito:"Prestito", mutuo:"Mutuo", altro:"Altro debito" };
   const lines = [
     "Ciao! Uso un'app per tenere sotto controllo i miei soldi e vorrei un parere. Ecco la mia situazione, solo numeri:",
     "",
-    `- Entrate: circa ${fmt(entrate())} al mese (stipendio ${S.entrate.tipo === "fisso" ? "fisso" : "variabile, questa è la media"}${S.modo === "coppia" ? ", siamo in due" : ""})`,
-    `- Spese fisse (casa, abbonamenti, ecc.): ${fmt(fisseTot())} al mese`,
+    `- Entrate: circa ${fmt(entrate())} al mese (stipendio ${S.entrate.tipo === "fisso" ? "fisso" : "variabile, questa è la media"}${coppia() ? ", siamo in due" : ""})`,
+    `- Casa (affitto e bollette): in media ${fmt(mediaMese(S.casa))} al mese`,
+    `- Abbonamenti: in media ${fmt(mediaMese(S.abbonamenti))} al mese`,
     `- Rate: ${fmt(rateTot())} al mese`,
-    `- Budget per le spese di tutti i giorni: ${fmt(budgetMese())} al mese`,
+    `- Budget per le spese di tutti i giorni: ${fmt(budgetMedio())} al mese`,
     `- Avanzo stimato: ${fmt(avanzo())} al mese`,
-    `- Fondo di emergenza: ${fmt(S.fondo.saldo)} (copre circa ${fondoMesi().toFixed(1).replace(".", ",")} mesi di spese)`
+    `- Fondo di emergenza: ${fmt(S.fondo.saldo)} (copre circa ${dec(fondoMesi())} mesi di spese)`
   ];
-  const deb = ordineDebiti().filter(d => d.saldo > 0);
-  if (deb.length) { lines.push("- Debiti:"); deb.forEach(d => lines.push(`  • ${tipoNome[d.tipo] || "Debito"}: restano ${fmt(d.saldo)}${d.tasso != null ? `, tasso ${String(d.tasso).replace(".", ",")}%` : ", tasso non noto"}${d.rata ? `, rata ${fmt(d.rata)} al mese` : ""}`)); }
+  const deb = ordineDebiti().filter(d => !info(d).chiuso);
+  if (deb.length) { lines.push("- Debiti:"); deb.forEach(d => { const x = info(d);
+    lines.push(`  • ${tipoNome[d.tipo] || "Debito"}: ${x.saldo != null ? `restano ${fmt(x.saldo)}` : x.totRate ? `restano ${x.n} rate` : "durata non nota"}${x.tasso != null ? `, tasso ${String(x.tasso).replace(".", ",")}%${x.stimato ? " (stimato)" : ""}` : ", tasso non noto"}${d.rata ? `, rata ${fmt(d.rata)} al mese` : ""}${x.aRate && d.fine ? `, ultima rata ${meseAnno(parse(d.fine))}` : ""}`); }); }
   const m = meseCorrente(), sp = speseIn(m.a, m.b);
   if (sp.length) { const by = {}; sp.forEach(s => by[s.cat] = (by[s.cat] || 0) + s.importo); lines.push(`- Spese variabili di questo mese: ${Object.entries(by).sort((a, b) => b[1] - a[1]).map(([c, v]) => `${c} ${fmt(v)}`).join(", ")}`); }
   lines.push("", "Qual è il prossimo passo più utile per me? Spiegamelo in modo semplice e pratico, senza giudicare.");
@@ -909,16 +1267,23 @@ function ai() {
 
 /* ---------- Calendario (.ics) ---------- */
 function calendario() {
-  const g = clamp(+S.entrate.giorno || 23, 1, 28), now = today();
-  let pay = new Date(now.getFullYear(), now.getMonth(), g); if (pay < now) pay = new Date(now.getFullYear(), now.getMonth() + 1, g);
-  const sun = addDays(now, (7 - now.getDay()) % 7);
+  const now = today();
   const d8 = d => `${d.getFullYear()}${pad(d.getMonth() + 1)}${pad(d.getDate())}`;
+  const icsEsc = s => String(s).replace(/\\/g, "\\\\").replace(/[,;]/g, m => "\\" + m).replace(/\n/g, "\\n");
   const stamp = new Date().toISOString().replace(/[-:]/g, "").split(".")[0] + "Z";
-  const ev = (uidS, start, rrule, title, desc) => ["BEGIN:VEVENT", `UID:${uidS}@cipignolo`, `DTSTAMP:${stamp}`, `DTSTART:${d8(start)}T${uidS === "paga" ? "090000" : "180000"}`, "DURATION:PT10M", `RRULE:${rrule}`, `SUMMARY:${title}`, `DESCRIPTION:${desc}`, "BEGIN:VALARM", "ACTION:DISPLAY", `DESCRIPTION:${title}`, "TRIGGER:PT0M", "END:VALARM", "END:VEVENT"];
-  const lines = ["BEGIN:VCALENDAR", "VERSION:2.0", "PRODID:-//Cipignolo//IT", "CALSCALE:GREGORIAN",
-    ...(S.entrate.tipo === "fisso" ? ev("paga", pay, `FREQ=MONTHLY;BYMONTHDAY=${g}`, "Cipignolo: giorno di paga", "Il rito dei 5 minuti: apri Cipignolo e sistema il mese.") : []),
-    ...ev("domenica", sun, "FREQ=WEEKLY;BYDAY=SU", "Cipignolo: check della domenica", "5 minuti per vedere come è andata la settimana."),
-    "END:VCALENDAR"];
+  const ev = (uidS, start, ora, rrule, title, desc) => ["BEGIN:VEVENT", `UID:${uidS}@cipignolo`, `DTSTAMP:${stamp}`, `DTSTART:${d8(start)}T${ora}`, "DURATION:PT10M", `RRULE:${rrule}`, `SUMMARY:${icsEsc(title)}`, `DESCRIPTION:${icsEsc(desc)}`, "BEGIN:VALARM", "ACTION:DISPLAY", `DESCRIPTION:${icsEsc(title)}`, "TRIGGER:PT0M", "END:VALARM", "END:VEVENT"];
+  const paga = (g, who, k) => { g = clamp(+g || 23, 1, 28); let p = new Date(now.getFullYear(), now.getMonth(), g); if (p < now) p = new Date(now.getFullYear(), now.getMonth() + 1, g);
+    return ev("paga" + k, p, "090000", `FREQ=MONTHLY;BYMONTHDAY=${g}`, `Cipignolo: giorno di paga${who}`, "Il rito dei 5 minuti: apri Cipignolo e sistema il mese."); };
+  const sun = addDays(now, (7 - now.getDay()) % 7);
+  const ev2 = [];
+  if (S.entrate.tipo === "fisso") {
+    ev2.push(...paga(S.entrate.giorno, coppia() ? ` (${S.nick.p1})` : "", 1));
+    if (coppia() && +S.entrate.importo2 > 0) ev2.push(...paga(S.entrate.giorno2, ` (${S.nick.p2})`, 2));
+  }
+  ev2.push(...ev("domenica", sun, "180000", "FREQ=WEEKLY;BYDAY=SU", "Cipignolo: check della domenica", "5 minuti per vedere come è andata la settimana."));
+  voci().forEach(v => { const p = prossima(v); if (!p) return; const f = Math.max(1, +v.freq || 1);
+    ev2.push(...ev("v" + v.id, p, "090000", `FREQ=MONTHLY;INTERVAL=${f}`, v.k === "abb" ? `Cipignolo: rinnovo ${v.nome} (${fmt2(v.importo)})` : `Cipignolo: ${v.nome} (circa ${fmt(v.importo)})`, v.k === "abb" ? "Si rinnova oggi: lo usi ancora?" : "Scadenza di casa. Se l'importo è cambiato, aggiornalo in Cipignolo.")); });
+  const lines = ["BEGIN:VCALENDAR", "VERSION:2.0", "PRODID:-//Cipignolo//IT", "CALSCALE:GREGORIAN", ...ev2, "END:VCALENDAR"];
   download(new Blob([lines.join("\r\n")], { type:"text/calendar" }), "cipignolo-promemoria.ics");
   toast("Apri il file per aggiungere i promemoria al calendario");
 }
@@ -940,8 +1305,8 @@ function esporta() {
 function importa() {
   const fi = $("#fileIn"); fi.value = "";
   fi.onchange = () => { const f = fi.files[0]; if (!f) return; const r = new FileReader();
-    r.onload = () => { try { const d = JSON.parse(r.result); if (!d || d.v !== 1 || !d.entrate) throw 0;
-        S = Object.assign(blank(), d); S.setup = true; OB = null; check(true); save(); closeSheet(true); VIEW = "home"; render(); toast("Dati importati!"); }
+    r.onload = () => { try { const d = JSON.parse(r.result); if (!d || !(d.v === 1 || d.v === 2) || !d.entrate) throw 0;
+        S = migra(d); S.setup = true; OB = null; check(true); save(); closeSheet(true); VIEW = "home"; render(); toast("Dati importati!"); }
       catch (e) { toast("Questo file non sembra un backup di Cipignolo"); } };
     r.readAsText(f); };
   fi.click();
@@ -949,16 +1314,21 @@ function importa() {
 
 /* ---------- Impostazioni ---------- */
 function settings() {
-  const e = S.entrate;
+  const e = S.entrate, two = coppia();
   sheet(`<h3>Impostazioni</h3>
-    <label class="f">Conti</label><div class="seg"><button class="opt ${S.modo === "solo" ? "on" : ""}" data-m="solo">Da solo</button><button class="opt ${S.modo === "coppia" ? "on" : ""}" data-m="coppia">In coppia</button></div>
+    <label class="f">Conti</label><div class="seg"><button class="opt ${!two ? "on" : ""}" data-m="solo">Da solo</button><button class="opt ${two ? "on" : ""}" data-m="coppia">In coppia</button></div>
+    <div id="nkw" class="${two ? "" : "hidden"}"><div class="g2"><div><label class="f" for="k1" style="margin-top:6px">Nickname 1</label><input class="in" id="k1" maxlength="14" value="${esc(S.nick.p1)}"></div><div><label class="f" for="k2" style="margin-top:6px">Nickname 2</label><input class="in" id="k2" maxlength="14" value="${esc(S.nick.p2)}"></div></div></div>
     <label class="f">Stipendio</label><div class="seg"><button class="opt ${e.tipo === "fisso" ? "on" : ""}" data-st="fisso">Fisso</button><button class="opt ${e.tipo === "variabile" ? "on" : ""}" data-st="variabile">Variabile (media)</button></div>
-    ${moneyField("s1", e.importo, e.tipo === "fisso" ? "Stipendio al mese" : "Media al mese")}
-    <div id="s2w" class="${S.modo === "coppia" ? "" : "hidden"}">${moneyField("s2", e.importo2, "Stipendio dell'altra persona")}</div>
+    ${moneyField("s1", e.importo, two ? `Entrate di ${esc(S.nick.p1)} al mese` : "Entrate al mese")}
     <label class="f" for="sg">Giorno di paga</label><input class="in" id="sg" inputmode="numeric" value="${e.giorno}">
-    ${moneyField("sb", budgetMese(), `Budget spese variabili al mese (suggerito ${fmt(budgetSuggerito())})`)}
-    <p class="small">Circa ${fmt(budgetSett())} a settimana.</p>
-    <label class="f">Spese fisse al mese</label><div id="fx">${S.fisse.map(fxRow).join("")}</div><button class="btn line" id="addfx">+ Spesa fissa</button>
+    <div id="s2w" class="${two ? "" : "hidden"}">${moneyField("s2", e.importo2, `Entrate di ${esc(S.nick.p2)} al mese`)}
+      <label class="f" for="sg2">Giorno di paga</label><input class="in" id="sg2" inputmode="numeric" value="${e.giorno2 ?? e.giorno}"></div>
+    ${moneyField("sb", S.budgetMensile, `Budget spese di tutti i giorni al mese`)}
+    <p class="small">Lascia vuoto per il calcolo automatico (questo mese ${fmt(budgetSuggerito())}, cambia quando arrivano bollette e rinnovi).</p>
+    <div id="bpw" class="${two ? "" : "hidden"}"><label class="f">Budget a testa a settimana (facoltativo)</label>
+      <div class="g2"><div><label for="bp1">${esc(S.nick.p1)}</label><input class="in" id="bp1" inputmode="decimal" placeholder="€" value="${esc(valStr(S.budgetPers.p1))}"></div><div><label for="bp2">${esc(S.nick.p2)}</label><input class="in" id="bp2" inputmode="decimal" placeholder="€" value="${esc(valStr(S.budgetPers.p2))}"></div></div>
+      <p class="small">Quello che resta del budget va nella cassa comune (Insieme).</p></div>
+    <p class="small" style="margin-top:14px">Casa, abbonamenti e rate si gestiscono nella scheda Piano.</p>
     <label class="f">Tasti rapidi</label><div id="rq">${S.rapidi.map(rqRow).join("")}</div>
     <select class="in" id="rqAdd" aria-label="Aggiungi tasto rapido"><option value="">+ Aggiungi un tasto rapido</option>${RAPIDI_CATALOGO.filter(r => !S.rapidi.some(x => x.nome === r.nome)).map(r => `<option value="${esc(r.nome)}">${esc(r.nome)}</option>`).join("")}</select>
     <button class="btn" id="save">Salva</button>
@@ -968,16 +1338,18 @@ function settings() {
     <button class="btn danger" id="reset" style="margin-top:26px">Cancella tutti i dati</button>
     <p class="disc">Cipignolo è gratuito e senza pubblicità. Non è consulenza finanziaria: dà numeri e idee, le decisioni restano tue.</p>`, b => {
     let modo = S.modo, tipo = e.tipo;
-    b.querySelectorAll("[data-m]").forEach(x => x.onclick = () => { modo = x.dataset.m; b.querySelectorAll("[data-m]").forEach(y => y.classList.toggle("on", y === x)); $("#s2w", b).classList.toggle("hidden", modo !== "coppia"); });
+    b.querySelectorAll("[data-m]").forEach(x => x.onclick = () => { modo = x.dataset.m; b.querySelectorAll("[data-m]").forEach(y => y.classList.toggle("on", y === x)); ["#s2w", "#nkw", "#bpw"].forEach(s => $(s, b).classList.toggle("hidden", modo !== "coppia")); });
     b.querySelectorAll("[data-st]").forEach(x => x.onclick = () => { tipo = x.dataset.st; b.querySelectorAll("[data-st]").forEach(y => y.classList.toggle("on", y === x)); });
-    $("#addfx", b).onclick = () => { $("#fx", b).insertAdjacentHTML("beforeend", fxRow({ id:uid(), nome:"", importo:"" })); };
     b.addEventListener("click", ev => { const d = ev.target.closest("[data-rm]"); if (d) d.closest(".fxr").remove(); });
     $("#rqAdd", b).onchange = ev => { const r = RAPIDI_CATALOGO.find(x => x.nome === ev.target.value); if (r) { $("#rq", b).insertAdjacentHTML("beforeend", rqRow({ ...r, id:uid() })); ev.target.querySelector(`option[value="${CSS.escape(r.nome)}"]`)?.remove(); ev.target.value = ""; } };
     $("#save", b).onclick = () => {
-      S.modo = modo; S.entrate = { tipo, importo:num($("#s1", b).value), importo2:num($("#s2", b).value), giorno:clamp(parseInt($("#sg", b).value, 10) || 23, 1, 31) };
+      S.modo = modo;
+      S.nick = { p1: $("#k1", b).value.trim() || S.nick.p1 || "Persona 1", p2: $("#k2", b).value.trim() || S.nick.p2 || "Persona 2" };
+      S.entrate = { tipo, importo:num($("#s1", b).value), importo2:num($("#s2", b).value), giorno:clamp(parseInt($("#sg", b).value, 10) || 23, 1, 31), giorno2:clamp(parseInt($("#sg2", b).value, 10) || 23, 1, 31) };
       const bud = num($("#sb", b).value); S.budgetMensile = bud > 0 ? bud : null;
-      S.fisse = [...b.querySelectorAll("#fx .fxr")].map(r => ({ id:r.dataset.id, nome:$(".n", r).value.trim(), importo:num($(".v", r).value) })).filter(f => f.nome && f.importo);
+      S.budgetPers = { p1: num($("#bp1", b).value) || null, p2: num($("#bp2", b).value) || null };
       S.rapidi = [...b.querySelectorAll("#rq .fxr")].map(r => { const base = JSON.parse(r.dataset.r); const p = numOrNull($(".v", r).value); return { ...base, prezzo: base.tipo === "libero" ? null : p }; });
+      if (!coppia()) FILTRO = "tutti";
       closeSheet(); commit("Impostazioni salvate"); };
     $("#exp", b).onclick = esporta; $("#imp", b).onclick = importa;
     $("#reset", b).onclick = () => sheet(`<h3>Sicuro?</h3><p class="sub">Cancelli tutti i dati da questo telefono. Se non hai un backup, non si possono recuperare.</p><button class="btn danger" id="yes">Sì, cancella tutto</button><button class="btn ghost" id="no">No, torna indietro</button>`, c => {
@@ -986,8 +1358,7 @@ function settings() {
     });
   });
 }
-const fxRow = f => `<div class="fxr row" data-id="${f.id}" style="gap:8px;margin-bottom:8px"><input class="in n" aria-label="Voce" value="${esc(f.nome)}" placeholder="Voce" style="flex:1"><input class="in v" aria-label="Importo" inputmode="decimal" value="${f.importo !== "" ? String(f.importo).replace(".", ",") : ""}" placeholder="€" style="width:96px"><button class="ibtn" data-rm aria-label="Rimuovi" style="box-shadow:none;background:var(--bg)">${ico("plus", 2.2).replace("<svg", '<svg style="transform:rotate(45deg)"')}</button></div>`;
-const rqRow = r => `<div class="fxr row" data-r='${esc(JSON.stringify(r))}' style="gap:8px;margin-bottom:8px"><span style="flex:1;font-weight:800">${esc(r.nome)}</span>${r.tipo === "libero" ? '<span class="small" style="width:96px;text-align:center">a importo</span><input class="v hidden">' : `<input class="in v" aria-label="Prezzo ${esc(r.nome)}" inputmode="decimal" value="${r.prezzo != null ? String(r.prezzo).replace(".", ",") : ""}" placeholder="€" style="width:96px">`}<button class="ibtn" data-rm aria-label="Rimuovi ${esc(r.nome)}" style="box-shadow:none;background:var(--bg)">${ico("plus", 2.2).replace("<svg", '<svg style="transform:rotate(45deg)"')}</button></div>`;
+const rqRow = r => `<div class="fxr row" data-r='${esc(JSON.stringify(r))}' style="gap:8px;margin-bottom:8px"><span style="flex:1;font-weight:800">${esc(r.nome)}</span>${r.tipo === "libero" ? '<span class="small" style="width:96px;text-align:center">a importo</span><input class="v hidden">' : `<input class="in v" aria-label="Prezzo ${esc(r.nome)}" inputmode="decimal" value="${r.prezzo != null ? String(r.prezzo).replace(".", ",") : ""}" placeholder="€" style="width:96px">`}<button class="ibtn" data-rm aria-label="Rimuovi ${esc(r.nome)}" style="box-shadow:none;background:var(--bg)">${xIco()}</button></div>`;
 
 /* ---------- avvio ---------- */
 if (S.setup) check(true);
